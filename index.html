@@ -122,6 +122,7 @@ const say=(t,err)=>{const e=$('msgt');e.textContent=t;e.style.background=err?'rg
 //  · 脊椎預設有輕微自然彎曲（頸前傾、頭補償），有 hips 的躺／趴姿勢不套用（natural:false 也可關）
 //  · 手肘／膝蓋若被設成伸直，會自動微彎：elbow（預設 10°）、knee（預設 6°，可 {L,R}）；straightArms／straightLegs 關閉（支撐身體時用）
 //  · contra:'L'|'R'＝重心放在該側腿（骨盆微傾、脊椎反向補償、另一腿膝蓋微彎）
+//  · armsRel／legsRel：true＝手臂／腿的方向相對於軀幹（含扭轉、前傾）／骨盆的座標系，扭轉大的姿勢用它，才不會手腳忽略身體轉向
 // ── 手與腳 ──
 //  · palm：手掌朝向 'in'（朝身體中線）|'down'|'up'|'forward'|'back'|'out'，或 {L,R}。預設：手垂下用 'in'，其他用 'down'
 //  · hand：{L:{dir:[o,f,u],palm}}，手的方向與前臂不同時用（手腕彎折，例如手掌撐地：dir:[0,1,0],palm:'down'）
@@ -141,7 +142,6 @@ const POSE_GROUPS=[
   {name:'雙臂交叉（胸前）',arms:{sym:[[0.15,0.3,-1],[-1,0.3,0.1]]},legs:{sym:STAND},contra:'L',palm:'in'},
   {name:'雙手合十',arms:{sym:[[0.15,0.25,-1],[-0.5,0.7,0.5]]},legs:{sym:STAND},palm:'in',fingers:'open'},
   {name:'單手按胸口（左手）',arms:{L:[[0.2,0.2,-1],[-1,0.45,0.3]],R:ARM_DOWN},legs:{sym:STAND},contra:'R',palm:{L:'in',R:'in'},fingers:{L:'open',R:'relaxed'}},
-  {name:'雙手放肚子',arms:{sym:[[0.1,0.1,-1],[-0.5,0.8,-0.3]]},legs:{sym:STAND},palm:'up'},
   {name:'雙手愛心（臉前）',arms:{sym:[[0.7,0.5,-0.2],[-0.55,0.75,0.35]]},legs:{sym:STAND},palm:'in',fingers:'open',head:{lean:4}},
   {name:'雙臂前舉（殭屍）',arms:{sym:[[0,1,0],[0,1,0]]},legs:{sym:STAND},palm:'down',fingers:'open'},
   {name:'張開雙臂（擁抱）',arms:{sym:[[0.6,0.7,0],[0.2,0.9,0]]},legs:{sym:STAND},palm:'forward',fingers:'open',torso:{bend:-4}},
@@ -158,12 +158,8 @@ const POSE_GROUPS=[
  {group:'上身與頭部',poses:[
   {name:'鞠躬 45°',arms:{sym:[[0.1,0.1,-1],[0.1,0.1,-1]]},legs:{sym:STAND},torso:{bend:45},palm:'in'},
   {name:'彎腰 90°（摸腳尖）',arms:{sym:[[0.05,0.1,-1],[0.05,0.1,-1]]},legs:{sym:STAND},torso:{bend:90},head:{bend:-20},knee:12},
-  {name:'向後仰',arms:{sym:ARM_DOWN},legs:{sym:STAND},torso:{bend:-25},head:{bend:-10}},
   {name:'向左側彎',arms:{L:[[0.1,0,-1],[0.1,0,-1]],R:[[0.7,0,0.7],[0.2,0,1]]},legs:{sym:STAND},torso:{lean:28},palm:{L:'in',R:'in'},fingers:{R:'open',L:'relaxed'}},
   {name:'扭腰回頭（向左）',arms:{sym:ARM_DOWN},legs:{sym:STAND},torso:{twist:40},head:{twist:35}},
-  {name:'歪頭',arms:{sym:[[0.1,-0.4,-1],[-1,-0.2,-0.3]]},legs:{sym:STAND},contra:'R',head:{lean:22},palm:'back'},
-  {name:'低頭',arms:{sym:ARM_DOWN},legs:{sym:STAND},head:{bend:35},contra:'R'},
-  {name:'抬頭看天',arms:{sym:ARM_DOWN},legs:{sym:STAND},head:{bend:-32},torso:{bend:-6},contra:'L'},
  ]},
  {group:'坐、蹲、跪',poses:[
   {name:'坐椅子',arms:{sym:[[0.12,0.3,-1],[-0.3,0.9,-0.4]]},legs:{sym:[[0.08,1,0],[0.04,0,-1]]},palm:'down',torso:{bend:4}},
@@ -191,6 +187,32 @@ const POSE_GROUPS=[
   {name:'眼鏡蛇式',arms:{sym:[[0.12,0,-1],[0.12,0,-1]]},legs:{sym:[[0.05,-1,0],[0.05,-1,0]]},hips:{bend:90},torso:{bend:-58},head:{bend:-25},feet:'back',shift:[0,-0.25],straightArms:true,straightLegs:true,hand:{sym:{dir:[0,1,0],palm:'down'}},fingers:'open'},
   {name:'側臥',arms:{L:[[1,0,0],[1,0,0]],R:[[1,0.2,-0.1],[1,0.2,-0.1]]},legs:{L:[[-0.9,0.4,-0.1],[-0.8,-0.3,-0.1]],R:[[0.9,0.4,-0.1],[0.8,-0.3,-0.1]]},hips:{lean:90},head:{lean:-20},feet:null,hipsY:0.2,shift:[0.2,0],elbow:25,palm:'down'},
   {name:'四足跪姿（桌面式）',arms:{sym:[[0.1,0,-1],[0.1,0,-1]]},legs:{sym:[[0.05,0,-1],[0,-1,0]]},hips:{bend:72},head:{bend:-35},feet:'back',shift:[0,-0.15],straightArms:true,hand:{sym:{dir:[0,1,0],palm:'down'}},fingers:'open'},
+ ]},
+
+ {group:'軀幹扭轉',poses:[
+  {name:'回眸站姿（模特兒）',armsRel:true,arms:{L:[[0.75,0.15,0.65],[-0.55,0.35,0.75]],R:[[0.5,-0.2,-1],[-0.8,0.25,-0.5]]},legs:{sym:STAND},contra:'L',torso:{twist:55},head:{twist:-45},palm:{L:'in',R:'in'},fingers:{L:'open',R:'open'}},
+  {name:'三角扭轉式',armsRel:false,arms:{L:[[0.1,0.1,1],[0.1,0.1,1]],R:[[0.15,0.35,-1],[0.15,0.35,-1]]},legs:{L:[[0.1,0.5,-0.86],[0.1,0.5,-0.86]],R:[[0.05,-0.5,-0.86],[0.05,-0.5,-0.86]]},hips:{bend:75},torso:{twist:75},head:{bend:-30,twist:-30},straightArms:true,straightLegs:true,palm:{L:'forward',R:'down'},fingers:'open',feet:{L:'flat',R:'flat'},footYaw:25},
+  {name:'扭轉坐姿（半脊椎扭轉式）',armsRel:true,arms:{L:[[0.2,0.7,-0.4],[-0.9,0.4,0.1]],R:[[0.7,-0.6,-0.4],[0.4,-0.8,-0.5]]},legs:{L:[[0.45,0.75,0],[-0.9,-0.4,-0.1]],R:[[-0.1,0.6,0.55],[0.05,0.3,-0.95]]},torso:{twist:-65},head:{twist:-30},feet:{L:null,R:'flat'},palm:{L:'in',R:'down'},hipsY:0.12},
+  {name:'新月弓步扭轉（合十）',armsRel:true,arms:{sym:[[0.15,0.25,-1],[-0.5,0.7,0.5]]},legs:{L:[[0.05,0.85,-0.5],[0,0.1,-1]],R:[[0.05,-0.5,-0.85],[0,-0.9,-0.4]]},torso:{twist:-60,bend:8},head:{twist:-15},feet:{L:'flat',R:55},palm:'in',fingers:'open'},
+  {name:'射箭',armsRel:true,arms:{L:[[1,0.05,0.05],[1,0.05,0.05]],R:[[0.9,-0.35,0.1],[-0.85,0.5,0.15]]},legs:{sym:[[0.5,0,-0.86],[0.5,0,-0.86]]},torso:{twist:28},head:{twist:42},straightArms:false,elbow:4,palm:{L:'down',R:'down'},fingers:{L:'open',R:'fist'},footYaw:15},
+ ]},
+ {group:'後彎、前彎與平衡',poses:[
+  {name:'弓式（趴姿後仰抓腳）',arms:{sym:[[0.25,-0.85,0.25],[0.1,-0.9,0.4]]},legs:{sym:[[0.1,-0.35,0.2],[0.05,-0.3,0.95]]},hips:{bend:90},torso:{bend:-55},head:{bend:-30},hipsY:0.18,shift:[0,-0.1],straightArms:true,feet:{L:'point',R:'point'},palm:'in',fingers:'fist'},
+  {name:'輪式（全後彎）',arms:{sym:[[0.2,-0.2,-1],[0.2,-0.2,-1]]},legs:{sym:[[0.2,0.9,0.4],[0,0.15,-1]]},hips:{bend:-150},head:{bend:-10},straightArms:true,palm:'down',hand:{sym:{dir:[0,-1,0],palm:'down'}},fingers:'open',shift:[0,0.1]},
+  {name:'貓式（拱背低頭）',arms:{sym:[[0.1,0,-1],[0.1,0,-1]]},legs:{sym:[[0.05,0,-1],[0,-1,0]]},hips:{bend:72},torso:{bend:30},head:{bend:45},feet:'back',shift:[0,-0.15],straightArms:true,hand:{sym:{dir:[0,1,0],palm:'down'}},fingers:'open'},
+  {name:'牛式（塌腰抬頭）',arms:{sym:[[0.1,0,-1],[0.1,0,-1]]},legs:{sym:[[0.05,0,-1],[0,-1,0]]},hips:{bend:72},torso:{bend:-28},head:{bend:-40},feet:'back',shift:[0,-0.15],straightArms:true,hand:{sym:{dir:[0,1,0],palm:'down'}},fingers:'open'},
+  {name:'芭蕾 Arabesque（單腿後抬）',arms:{L:[[0.1,1,0.25],[0.1,1,0.25]],R:[[0.95,-0.35,0.2],[0.95,-0.35,0.2]]},legs:{L:[[0.05,-0.85,0.5],[0.05,-0.85,0.5]],R:STAND},torso:{bend:35},head:{bend:-30},knee:{L:0,R:0},feet:{L:'point',R:'flat'},palm:{L:'down',R:'down'},fingers:'open'},
+ ]},
+ {group:'單腿、纏繞與踢擊',poses:[
+  {name:'鷹式（手腳纏繞）',armsRel:true,arms:{L:[[-0.15,0.8,0.15],[0.1,0.25,1]],R:[[0.15,0.8,0.15],[-0.1,0.25,1]]},legs:{L:[[-0.65,0.55,0.05],[-0.2,-0.45,-0.85]],R:STAND},knee:{R:28},feet:{L:'relax',R:'flat'},palm:'in',fingers:'open',torso:{bend:6}},
+  {name:'樹式（腳貼大腿、頭頂合十）',arms:{sym:[[0.15,0.15,1],[-0.55,0.1,0.85]]},legs:{L:[[0.95,0.15,0.1],[-0.7,0.0,-0.7]],R:STAND},knee:{R:0},feet:{L:null,R:'flat'},palm:'in',fingers:'open'},
+  {name:'回旋踢',armsRel:true,arms:{L:[[0.3,0.6,-0.5],[-0.3,0.7,0.65]],R:[[0.35,0.5,-0.55],[-0.35,0.65,0.6]]},legs:{L:[[0.95,0.2,0.3],[0.95,0.2,0.3]],R:[[0.05,0,-1],[0.05,0,-1]]},torso:{lean:-32,twist:-30},head:{twist:30,lean:10},knee:{L:0,R:14},feet:{L:'point',R:'flat'},palm:'down',fingers:'fist'},
+ ]},
+ {group:'武術、運動與倒地',poses:[
+  {name:'騎馬步衝拳',armsRel:true,arms:{L:[[0.05,1,0.05],[0.05,1,0.05]],R:[[0.2,-0.5,-0.85],[0.05,0.9,0.15]]},legs:{sym:[[0.9,0.3,-0.3],[-0.1,-0.1,-1]]},torso:{twist:-12},palm:'down',fingers:'fist',straightArms:false,elbow:3,footYaw:25},
+  {name:'揮劍（雙手握把蓄力）',armsRel:true,arms:{R:[[0.55,-0.3,0.3],[-0.5,0.5,0.7]],L:[[0.1,0.55,0.05],[-0.85,0.35,0.35]]},legs:{L:[[0.05,0.85,-0.5],[0,0.1,-1]],R:[[0.05,-0.5,-0.85],[0,-0.9,-0.4]]},torso:{twist:-50,bend:6},head:{twist:30},feet:{L:'flat',R:55},palm:'in',fingers:'fist'},
+  {name:'投球蓄力（單腿抬起）',armsRel:true,arms:{L:[[0.3,1,0.1],[0.3,1,0.1]],R:[[0.95,-0.3,0.35],[0.3,-0.6,0.8]]},legs:{L:[[0.25,0.9,0.3],[0,0.2,-1]],R:STAND},torso:{twist:-28,bend:-8},head:{twist:28},knee:{R:10},feet:{L:'relax',R:'flat'},palm:{L:'down',R:'forward'},fingers:{L:'open',R:'relaxed'}},
+  {name:'倒地姿（戰損，側倒扭轉）',arms:{L:[[1,0.5,-0.1],[1,0.5,-0.1]],R:[[0.6,0.9,0.4],[0.3,0.95,0.3]]},legs:{L:[[-0.95,0.2,-0.1],[-0.95,0.2,-0.1]],R:[[0.8,0.55,0.15],[0.4,-0.7,-0.2]]},hips:{lean:90},torso:{twist:55,bend:15},head:{lean:-35,twist:25},feet:null,hipsY:0.2,shift:[0.2,0],straightLegs:true,elbow:20,palm:'down'},
  ]},
 ];
 const ALL_POSES=Object.fromEntries(POSE_GROUPS.flatMap(g=>g.poses).map(p=>[p.name,p]));
@@ -255,12 +277,15 @@ function computePose(vrm,def,m){
     const a=ar[key]||ar.sym;if(!a)continue;
     const rest=new V3(sg,0,0);
     const w1=new V3(sg*a[0][0],a[0][2],a[0][1]).normalize();let w2=new V3(sg*a[1][0],a[1][2],a[1][1]).normalize();
+    if(def.armsRel){w1.applyQuaternion(Dtorso);w2.applyQuaternion(Dtorso);}
     if(!def.straightArms&&angleDeg(w1,w2)<6)w2=bendToward(w1,F,def.elbow??10);
     const D1=new Q().setFromUnitVectors(rest,w1);let D2=new Q().setFromUnitVectors(rest,w2);
     // hand: direction (default: continuation of the forearm) and palm normal
     const hd=pick(def.hand,key);const hdir=hd&&hd.dir?new V3(sg*hd.dir[0],hd.dir[2],hd.dir[1]).normalize():w2.clone();
+    if(def.armsRel&&hd&&hd.dir)hdir.applyQuaternion(Dtorso);
     let palm=hd&&hd.palm?hd.palm:pick(def.palm,key);if(!palm)palm=(hdir.y<-0.6)?'in':'down';
-    const D3=handFrame(sg,hdir,PALM[palm](sg));
+    const pn=PALM[palm](sg);if(def.armsRel)pn.applyQuaternion(Dtorso);
+    const D3=handFrame(sg,hdir,pn);
     // forearm takes half of the twist between forearm and hand (the model has no twist bones)
     const rel=inv(D2).multiply(D3),ax=new V3(sg,0,0),v=new V3(rel.x,rel.y,rel.z),p=ax.clone().multiplyScalar(v.dot(ax));
     let tw=new Q(p.x,p.y,p.z,rel.w);if(tw.lengthSq()<1e-9)tw=new Q();else tw.normalize();
@@ -281,6 +306,7 @@ function computePose(vrm,def,m){
   for(const [side,key,sg] of sides){
     const a=lg[key]||lg.sym;if(!a)continue;
     let w1=new V3(sg*a[0][0],a[0][2],a[0][1]).normalize(),w2=new V3(sg*a[1][0],a[1][2],a[1][1]).normalize();
+    if(def.legsRel){w1.applyQuaternion(D.hips);w2.applyQuaternion(D.hips);}
     const kn=kneeOf(key);
     if(kn>0&&angleDeg(w1,w2)<4){w1=bendToward(w1,F,kn/2);w2=bendToward(w1,F,-kn);}
     const D1=new Q().setFromUnitVectors(restLeg,w1),D2=new Q().setFromUnitVectors(restLeg,w2);
