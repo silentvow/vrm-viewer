@@ -113,145 +113,202 @@ const $=id=>document.getElementById(id);
 const say=(t,err)=>{const e=$('msgt');e.textContent=t;e.style.background=err?'rgba(180,40,40,.85)':'rgba(0,0,0,.65)';};
 // ===== poses.js（內嵌）=====
 // 測試姿勢：以「標準化骨架」的世界座標方向設定，支援 VRM 1.0 與 0.x（含 rotateVRM0 的 180° 轉向）。
-// 方向向量 = [out, fwd, up]：out＝遠離身體中線（左右自動鏡射）、fwd＝面向的前方、up＝向上。
-// arms / legs：{L:[上段方向, 下段方向], R:[...]} 或 sym:[上段, 下段]（左右對稱）。L／R 是角色自己的左／右。
+// 方向向量 = [out, fwd, up]：out＝遠離身體中線（左右自動鏡射）、fwd＝面向的前方、up＝向上。L／R 是角色自己的左／右。
+// arms / legs：{L:[上段方向, 下段方向], R:[...]} 或 sym:[上段, 下段]（左右對稱）。
 // torso / head：{bend, twist, lean} 角度；bend＋＝向前彎（低頭）、twist＋＝向角色左轉、lean＋＝向角色左傾。
-// feet：'flat'（腳底貼地，預設）| 'up'（腳尖朝上）| 'down'（腳尖朝下）| 'back'（腳背朝下、腳尖朝後）| null（不處理）。
 // hips：{bend,twist,lean} 整個身體（骨盆）的朝向，躺、趴、側撐用（bend＋＝身體向前傾倒，臉朝下）。
-// hipsY：臀部高度（以腿長為單位，覆蓋自動貼地）；shift：[dx,dz] 臀部水平位移（以腿長為單位）。
-// hipsLift：臀部額外抬高（公尺，依模型比例換算）；hips 的高度預設會自動讓腳或膝蓋貼地。
+// hipsY：臀部高度（以腿長為單位，覆蓋自動貼地）；shift：[dx,dz] 臀部水平位移；hipsLift：額外抬高。
+// ── 讓姿勢不要太僵直（預設開啟，可用旗標關掉）──
+//  · 脊椎預設有輕微自然彎曲（頸前傾、頭補償），有 hips 的躺／趴姿勢不套用（natural:false 也可關）
+//  · 手肘／膝蓋若被設成伸直，會自動微彎：elbow（預設 10°）、knee（預設 6°，可 {L,R}）；straightArms／straightLegs 關閉（支撐身體時用）
+//  · contra:'L'|'R'＝重心放在該側腿（骨盆微傾、脊椎反向補償、另一腿膝蓋微彎）
+// ── 手與腳 ──
+//  · palm：手掌朝向 'in'（朝身體中線）|'down'|'up'|'forward'|'back'|'out'，或 {L,R}。預設：手垂下用 'in'，其他用 'down'
+//  · hand：{L:{dir:[o,f,u],palm}}，手的方向與前臂不同時用（手腕彎折，例如手掌撐地：dir:[0,1,0],palm:'down'）
+//  · fingers：'relaxed'（預設，輕微彎曲）|'open'|'fist'|'point'（食指伸直），或 {L,R}
+//  · feet：'flat'（腳底貼地，預設，會帶輕微外八 footYaw 預設 10°）|'up'|'down'|'back'|null|數字（世界座標下的腳尖下壓角度）
+//          |'point'（腳尖伸直）|'relax'（放鬆）|'flex'（勾腳）|{local:度數}（相對小腿），或 {L,R}
 const ARM_DOWN=[[0.25,0,-1],[0.25,0,-1]];
 const STAND=[[0.06,0,-1],[0.06,0,-1]];
 const POSE_GROUPS=[
  {group:'站姿',poses:[
-  {name:'A 字站姿（自然）',arms:{sym:ARM_DOWN},legs:{sym:STAND}},
-  {name:'八字站（雙腳外開）',arms:{sym:ARM_DOWN},legs:{sym:[[0.5,0,-1],[0.5,0,-1]]}},
-  {name:'叉腰',arms:{sym:[[0.5,-0.2,-1],[-0.8,0.25,-0.5]]},legs:{sym:STAND}},
-  {name:'雙手背後',arms:{sym:[[0.1,-0.4,-1],[-1,-0.2,-0.3]]},legs:{sym:STAND}},
+  {name:'A 字站姿（自然）',arms:{sym:ARM_DOWN},legs:{sym:STAND},contra:'L'},
+  {name:'八字站（雙腳外開）',arms:{sym:ARM_DOWN},legs:{sym:[[0.5,0,-1],[0.5,0,-1]]},footYaw:20},
+  {name:'叉腰',arms:{sym:[[0.5,-0.2,-1],[-0.8,0.25,-0.5]]},legs:{sym:STAND},contra:'R',palm:'in',fingers:'open'},
+  {name:'雙手背後',arms:{sym:[[0.1,-0.4,-1],[-1,-0.2,-0.3]]},legs:{sym:STAND},contra:'R',palm:'back'},
  ]},
  {group:'手臂（胸前、身前）',poses:[
-  {name:'雙臂交叉（胸前）',arms:{sym:[[0.15,0.3,-1],[-1,0.3,0.1]]},legs:{sym:STAND}},
-  {name:'雙手合十',arms:{sym:[[0.15,0.25,-1],[-0.5,0.7,0.5]]},legs:{sym:STAND}},
-  {name:'單手按胸口（左手）',arms:{L:[[0.2,0.2,-1],[-1,0.45,0.3]],R:ARM_DOWN},legs:{sym:STAND}},
-  {name:'雙手放肚子',arms:{sym:[[0.1,0.1,-1],[-0.5,0.8,-0.3]]},legs:{sym:STAND}},
-  {name:'雙手愛心（臉前）',arms:{sym:[[0.7,0.5,-0.2],[-0.55,0.75,0.35]]},legs:{sym:STAND}},
-  {name:'雙臂前舉（殭屍）',arms:{sym:[[0,1,0],[0,1,0]]},legs:{sym:STAND}},
-  {name:'張開雙臂（擁抱）',arms:{sym:[[0.6,0.7,0],[0.2,0.9,0]]},legs:{sym:STAND}},
-  {name:'單手指向前方（左手）',arms:{L:[[0,1,0.1],[0,1,0.1]],R:ARM_DOWN},legs:{sym:STAND}},
+  {name:'雙臂交叉（胸前）',arms:{sym:[[0.15,0.3,-1],[-1,0.3,0.1]]},legs:{sym:STAND},contra:'L',palm:'in'},
+  {name:'雙手合十',arms:{sym:[[0.15,0.25,-1],[-0.5,0.7,0.5]]},legs:{sym:STAND},palm:'in',fingers:'open'},
+  {name:'單手按胸口（左手）',arms:{L:[[0.2,0.2,-1],[-1,0.45,0.3]],R:ARM_DOWN},legs:{sym:STAND},contra:'R',palm:{L:'in',R:'in'},fingers:{L:'open',R:'relaxed'}},
+  {name:'雙手放肚子',arms:{sym:[[0.1,0.1,-1],[-0.5,0.8,-0.3]]},legs:{sym:STAND},palm:'up'},
+  {name:'雙手愛心（臉前）',arms:{sym:[[0.7,0.5,-0.2],[-0.55,0.75,0.35]]},legs:{sym:STAND},palm:'in',fingers:'open',head:{lean:4}},
+  {name:'雙臂前舉（殭屍）',arms:{sym:[[0,1,0],[0,1,0]]},legs:{sym:STAND},palm:'down',fingers:'open'},
+  {name:'張開雙臂（擁抱）',arms:{sym:[[0.6,0.7,0],[0.2,0.9,0]]},legs:{sym:STAND},palm:'forward',fingers:'open',torso:{bend:-4}},
+  {name:'單手指向前方（左手）',arms:{L:[[0,1,0.1],[0,1,0.1]],R:ARM_DOWN},legs:{sym:STAND},contra:'R',palm:{L:'in',R:'in'},fingers:{L:'point',R:'relaxed'}},
  ]},
  {group:'手臂（頭部附近、上舉）',poses:[
-  {name:'雙手托腮',arms:{sym:[[0.55,0.3,-0.45],[-0.35,0.35,1]]},legs:{sym:STAND}},
-  {name:'雙手抱頭（手放腦後）',arms:{sym:[[0.85,-0.2,0.45],[-0.6,-0.55,0.6]]},legs:{sym:STAND}},
-  {name:'敬禮（右手）',arms:{R:[[0.6,0.5,0],[-0.7,0.4,0.6]],L:ARM_DOWN},legs:{sym:STAND}},
-  {name:'揮手（左手）',arms:{L:[[0.8,0.2,0.6],[0.1,0,1]],R:ARM_DOWN},legs:{sym:STAND}},
-  {name:'頭頂比愛心',arms:{sym:[[0.15,0.15,1],[-0.55,0.1,0.85]]},legs:{sym:STAND},head:{bend:8}},
-  {name:'雙手高舉（Y 字）',arms:{sym:[[0.45,0,1],[0.45,0,1]]},legs:{sym:STAND}},
+  {name:'雙手托腮',arms:{sym:[[0.55,0.3,-0.45],[-0.35,0.35,1]]},legs:{sym:STAND},contra:'L',palm:'in',head:{lean:6}},
+  {name:'雙手抱頭（手放腦後）',arms:{sym:[[0.85,-0.2,0.45],[-0.6,-0.55,0.6]]},legs:{sym:STAND},palm:'in'},
+  {name:'敬禮（右手）',arms:{R:[[0.6,0.5,0],[-0.7,0.4,0.6]],L:ARM_DOWN},legs:{sym:STAND},palm:{R:'down',L:'in'},fingers:{R:'open',L:'relaxed'}},
+  {name:'揮手（左手）',arms:{L:[[0.8,0.2,0.6],[0.1,0,1]],R:ARM_DOWN},legs:{sym:STAND},contra:'R',palm:{L:'forward',R:'in'},fingers:{L:'open',R:'relaxed'},head:{lean:5}},
+  {name:'頭頂比愛心',arms:{sym:[[0.15,0.15,1],[-0.55,0.1,0.85]]},legs:{sym:STAND},head:{bend:8},palm:'in',fingers:'open'},
+  {name:'雙手高舉（Y 字）',arms:{sym:[[0.45,0,1],[0.45,0,1]]},legs:{sym:STAND},palm:'forward',fingers:'open',torso:{bend:-5},head:{bend:-6}},
  ]},
  {group:'上身與頭部',poses:[
-  {name:'鞠躬 45°',arms:{sym:[[0.1,0.1,-1],[0.1,0.1,-1]]},legs:{sym:STAND},torso:{bend:45}},
-  {name:'彎腰 90°（摸腳尖）',arms:{sym:[[0.05,0.1,-1],[0.05,0.1,-1]]},legs:{sym:STAND},torso:{bend:90},head:{bend:-20}},
+  {name:'鞠躬 45°',arms:{sym:[[0.1,0.1,-1],[0.1,0.1,-1]]},legs:{sym:STAND},torso:{bend:45},palm:'in'},
+  {name:'彎腰 90°（摸腳尖）',arms:{sym:[[0.05,0.1,-1],[0.05,0.1,-1]]},legs:{sym:STAND},torso:{bend:90},head:{bend:-20},knee:12},
   {name:'向後仰',arms:{sym:ARM_DOWN},legs:{sym:STAND},torso:{bend:-25},head:{bend:-10}},
-  {name:'向左側彎',arms:{L:[[0.1,0,-1],[0.1,0,-1]],R:[[0.7,0,0.7],[0.2,0,1]]},legs:{sym:STAND},torso:{lean:28}},
+  {name:'向左側彎',arms:{L:[[0.1,0,-1],[0.1,0,-1]],R:[[0.7,0,0.7],[0.2,0,1]]},legs:{sym:STAND},torso:{lean:28},palm:{L:'in',R:'in'},fingers:{R:'open',L:'relaxed'}},
   {name:'扭腰回頭（向左）',arms:{sym:ARM_DOWN},legs:{sym:STAND},torso:{twist:40},head:{twist:35}},
-  {name:'歪頭',arms:{sym:[[0.1,-0.4,-1],[-1,-0.2,-0.3]]},legs:{sym:STAND},head:{lean:22}},
-  {name:'低頭',arms:{sym:ARM_DOWN},legs:{sym:STAND},head:{bend:35}},
-  {name:'抬頭看天',arms:{sym:ARM_DOWN},legs:{sym:STAND},head:{bend:-32},torso:{bend:-6}},
+  {name:'歪頭',arms:{sym:[[0.1,-0.4,-1],[-1,-0.2,-0.3]]},legs:{sym:STAND},contra:'R',head:{lean:22},palm:'back'},
+  {name:'低頭',arms:{sym:ARM_DOWN},legs:{sym:STAND},head:{bend:35},contra:'R'},
+  {name:'抬頭看天',arms:{sym:ARM_DOWN},legs:{sym:STAND},head:{bend:-32},torso:{bend:-6},contra:'L'},
  ]},
  {group:'坐、蹲、跪',poses:[
-  {name:'坐椅子',arms:{sym:[[0.12,0.3,-1],[-0.3,0.9,-0.4]]},legs:{sym:[[0.08,1,0],[0.04,0,-1]]}},
-  {name:'深蹲',arms:{sym:[[0.2,0.9,0],[0.1,1,0]]},legs:{sym:[[0.25,0.85,0.45],[0,0.5,-0.87]]},torso:{bend:30}},
-  {name:'跪坐（正坐）',arms:{sym:[[0.1,0.3,-1],[-0.3,0.9,-0.5]]},legs:{sym:[[0.1,0.9,-0.45],[0.0,-1,-0.1]]},feet:'back'},
-  {name:'M 字坐（雙膝抬起外開）',arms:{sym:[[0.15,0.4,-1],[-0.3,0.7,-0.6]]},legs:{sym:[[0.7,0.45,0.35],[-0.35,0.2,-0.9]]}},
-  {name:'盤腿坐',arms:{sym:[[0.2,0.1,-1],[-0.1,0.9,-0.5]]},legs:{sym:[[0.8,0.6,0],[-0.9,0.4,-0.1]]},feet:null},
+  {name:'坐椅子',arms:{sym:[[0.12,0.3,-1],[-0.3,0.9,-0.4]]},legs:{sym:[[0.08,1,0],[0.04,0,-1]]},palm:'down',torso:{bend:4}},
+  {name:'深蹲',arms:{sym:[[0.2,0.9,0],[0.1,1,0]]},legs:{sym:[[0.25,0.85,0.45],[0,0.5,-0.87]]},torso:{bend:30},palm:'in',fingers:'open'},
+  {name:'跪坐（正坐）',arms:{sym:[[0.1,0.3,-1],[-0.3,0.9,-0.5]]},legs:{sym:[[0.1,0.9,-0.45],[0.0,-1,-0.1]]},feet:'back',palm:'down',torso:{bend:3}},
+  {name:'M 字坐（雙膝抬起外開）',arms:{sym:[[0.15,0.4,-1],[-0.3,0.7,-0.6]]},legs:{sym:[[0.7,0.45,0.35],[-0.35,0.2,-0.9]]},palm:'down'},
+  {name:'盤腿坐',arms:{sym:[[0.2,0.1,-1],[-0.1,0.9,-0.5]]},legs:{sym:[[0.8,0.6,0],[-0.9,0.4,-0.1]]},feet:null,palm:'up',torso:{bend:4}},
  ]},
  {group:'腿部動作',poses:[
-  {name:'左右劈腿（一字馬）',arms:{sym:ARM_DOWN},legs:{sym:[[1,0,-0.03],[1,0,-0.03]]}},
-  {name:'I 字朝天蹬（站立劈腿）',arms:{L:[[0.2,0.5,0.8],[0,0.4,0.9]],R:[[0.9,0,0.2],[0.9,0,0.2]]},legs:{L:[[0,0.3,0.95],[0,0.3,0.95]],R:STAND},torso:{bend:-8},head:{bend:-10}},
-  {name:'前後劈腿',arms:{sym:[[0.9,0,0.2],[0.9,0,0.2]]},legs:{L:[[0,1,-0.03],[0,1,-0.03]],R:[[0,-1,-0.03],[0,-1,-0.03]]}},
-  {name:'弓步（左腳在前）',arms:{sym:[[0.1,0.4,-1],[-0.4,0.8,-0.3]]},legs:{L:[[0.05,0.85,-0.5],[0,0.1,-1]],R:[[0.05,-0.5,-0.85],[0,-0.9,-0.4]]}},
-  {name:'抬腿踢（左腳）',arms:{sym:[[0.9,0,0.2],[0.9,0,0.2]]},legs:{L:[[0.1,1,0],[0.1,1,0]],R:STAND}},
-  {name:'金雞獨立（左腳抬起）',arms:{sym:[[0.9,0,0.2],[0.9,0,0.2]]},legs:{L:[[0.05,1,0],[0,0,-1]],R:STAND}},
-  {name:'跑步',arms:{L:[[0.2,-0.5,-0.85],[0,0.9,-0.3]],R:[[0.2,0.6,-0.75],[0,0.9,0.3]]},legs:{L:[[0.05,0.85,-0.5],[0,-0.4,-1]],R:[[0.05,-0.6,-0.8],[0,-0.9,-0.4]]},torso:{bend:10}},
-  {name:'跳躍（半空）',arms:{sym:[[0.5,0,0.9],[0.5,0,0.9]]},legs:{sym:[[0.1,0.4,-0.9],[0,-0.8,-0.6]]},hipsLift:0.25},
+  {name:'左右劈腿（一字馬）',arms:{sym:ARM_DOWN},legs:{sym:[[1,0,-0.03],[1,0,-0.03]]},straightLegs:true,feet:'up',palm:'down',torso:{bend:3}},
+  {name:'I 字朝天蹬（站立劈腿）',arms:{L:[[0.2,0.5,0.8],[0,0.4,0.9]],R:[[0.9,0,0.2],[0.9,0,0.2]]},legs:{L:[[0,0.3,0.95],[0,0.3,0.95]],R:STAND},torso:{bend:-8},head:{bend:-10},knee:{L:0,R:8},feet:{L:'point',R:'flat'},fingers:{L:'open',R:'open'},palm:{L:'in',R:'down'}},
+  {name:'前後劈腿',arms:{sym:[[0.9,0,0.2],[0.9,0,0.2]]},legs:{L:[[0,1,-0.03],[0,1,-0.03]],R:[[0,-1,-0.03],[0,-1,-0.03]]},straightLegs:true,feet:{L:'up',R:'down'},palm:'down',fingers:'open'},
+  {name:'弓步（左腳在前）',arms:{sym:[[0.1,0.4,-1],[-0.4,0.8,-0.3]]},legs:{L:[[0.05,0.85,-0.5],[0,0.1,-1]],R:[[0.05,-0.5,-0.85],[0,-0.9,-0.4]]},feet:{L:'flat',R:55},palm:'in',torso:{bend:6}},
+  {name:'抬腿踢（左腳）',arms:{sym:[[0.9,0,0.2],[0.9,0,0.2]]},legs:{L:[[0.1,1,0],[0.1,1,0]],R:STAND},knee:{L:0,R:8},feet:{L:'point',R:'flat'},palm:'down',fingers:'open',torso:{bend:-6}},
+  {name:'金雞獨立（左腳抬起）',arms:{sym:[[0.9,0,0.2],[0.9,0,0.2]]},legs:{L:[[0.05,1,0],[0,0,-1]],R:STAND},knee:{R:6},feet:{L:'relax',R:'flat'},palm:'down',fingers:'open'},
+  {name:'跑步',arms:{L:[[0.2,-0.5,-0.85],[0,0.9,-0.3]],R:[[0.2,0.6,-0.75],[0,0.9,0.3]]},legs:{L:[[0.05,0.85,-0.5],[0,-0.4,-1]],R:[[0.05,-0.6,-0.8],[0,-0.9,-0.4]]},torso:{bend:10},feet:{L:'flex',R:'point'},palm:'in',fingers:'relaxed',head:{bend:-6}},
+  {name:'跳躍（半空）',arms:{sym:[[0.5,0,0.9],[0.5,0,0.9]]},legs:{sym:[[0.1,0.4,-0.9],[0,-0.8,-0.6]]},hipsLift:0.25,feet:'point',palm:'forward',fingers:'open',torso:{bend:-4}},
  ]},
-
  {group:'瑜珈與地面姿勢',poses:[
-  {name:'棒式（手杖式，坐姿伸腿）',arms:{sym:[[0.15,0.1,-1],[0.1,0.3,-1]]},legs:{sym:[[0.03,1,0],[0.03,1,0]]},feet:'up'},
-  {name:'橋式（仰臥抬臀）',arms:{sym:[[0.15,1,-0.1],[0.15,1,-0.1]]},legs:{sym:[[0.1,0.8,0.55],[0,0.2,-1]]},hips:{bend:-125},head:{bend:20}},
-  {name:'平板式（高位撐體）',arms:{sym:[[0.12,0,-1],[0.12,0,-1]]},legs:{sym:[[0.05,-0.85,-0.52],[0.05,-0.85,-0.52]]},hips:{bend:90},head:{bend:-60},feet:'down',shift:[0,-0.25]},
-  {name:'側板式（手撐側撐）',arms:{L:[[0,0,-1],[0,0,-1]],R:[[0,0,1],[0,0,1]]},legs:{L:[[-0.85,0,-0.52],[-0.85,0,-0.52]],R:[[0.85,0,-0.48],[0.85,0,-0.48]]},hips:{lean:90},head:{lean:-70},feet:null,shift:[0.25,0]},
-  {name:'側棒式（前臂側撐）',arms:{L:[[0,0,-1],[0,1,-0.05]],R:[[0,0,1],[0,0,1]]},legs:{L:[[-0.96,0,-0.29],[-0.96,0,-0.29]],R:[[0.96,0,-0.27],[0.96,0,-0.27]]},hips:{lean:90},head:{lean:-70},feet:null,shift:[0.25,0]},
-  {name:'眼鏡蛇式',arms:{sym:[[0.12,0,-1],[0.12,0,-1]]},legs:{sym:[[0.05,-1,0],[0.05,-1,0]]},hips:{bend:90},torso:{bend:-58},head:{bend:-25},feet:'back',shift:[0,-0.25]},
-  {name:'側臥',arms:{L:[[1,0,0],[1,0,0]],R:[[1,0.2,-0.1],[1,0.2,-0.1]]},legs:{L:[[-0.9,0.4,-0.1],[-0.8,-0.3,-0.1]],R:[[0.9,0.4,-0.1],[0.8,-0.3,-0.1]]},hips:{lean:90},head:{lean:-20},feet:null,hipsY:0.2,shift:[0.2,0]},
-  {name:'四足跪姿（桌面式）',arms:{sym:[[0.1,0,-1],[0.1,0,-1]]},legs:{sym:[[0.05,0,-1],[0,-1,0]]},hips:{bend:72},head:{bend:-35},feet:'back',shift:[0,-0.15]},
+  {name:'棒式（手杖式，坐姿伸腿）',arms:{sym:[[0.15,0.1,-1],[0.1,0.3,-1]]},legs:{sym:[[0.03,1,0],[0.03,1,0]]},feet:'up',straightLegs:true,straightArms:true,hand:{sym:{dir:[0,1,0],palm:'down'}},fingers:'open'},
+  {name:'橋式（仰臥抬臀）',arms:{sym:[[0.15,1,-0.1],[0.15,1,-0.1]]},legs:{sym:[[0.1,0.8,0.55],[0,0.2,-1]]},hips:{bend:-125},head:{bend:20},straightArms:true,palm:'down'},
+  {name:'平板式（高位撐體）',arms:{sym:[[0.12,0,-1],[0.12,0,-1]]},legs:{sym:[[0.05,-0.85,-0.52],[0.05,-0.85,-0.52]]},hips:{bend:90},head:{bend:-60},feet:'down',shift:[0,-0.25],straightArms:true,straightLegs:true,hand:{sym:{dir:[0,1,0],palm:'down'}},fingers:'open'},
+  {name:'側板式（手撐側撐）',arms:{L:[[0,0,-1],[0,0,-1]],R:[[0,0,1],[0,0,1]]},legs:{L:[[-0.85,0,-0.52],[-0.85,0,-0.52]],R:[[0.85,0,-0.48],[0.85,0,-0.48]]},hips:{lean:90},head:{lean:-70},feet:null,shift:[0.25,0],straightArms:true,straightLegs:true,hand:{L:{dir:[0,1,0],palm:'down'}},palm:{R:'in'},fingers:'open'},
+  {name:'側棒式（前臂側撐）',arms:{L:[[0,0,-1],[0,1,-0.05]],R:[[0,0,1],[0,0,1]]},legs:{L:[[-0.96,0,-0.29],[-0.96,0,-0.29]],R:[[0.96,0,-0.27],[0.96,0,-0.27]]},hips:{lean:90},head:{lean:-70},feet:null,shift:[0.25,0],straightArms:true,straightLegs:true,palm:{L:'down',R:'in'},fingers:'open'},
+  {name:'眼鏡蛇式',arms:{sym:[[0.12,0,-1],[0.12,0,-1]]},legs:{sym:[[0.05,-1,0],[0.05,-1,0]]},hips:{bend:90},torso:{bend:-58},head:{bend:-25},feet:'back',shift:[0,-0.25],straightArms:true,straightLegs:true,hand:{sym:{dir:[0,1,0],palm:'down'}},fingers:'open'},
+  {name:'側臥',arms:{L:[[1,0,0],[1,0,0]],R:[[1,0.2,-0.1],[1,0.2,-0.1]]},legs:{L:[[-0.9,0.4,-0.1],[-0.8,-0.3,-0.1]],R:[[0.9,0.4,-0.1],[0.8,-0.3,-0.1]]},hips:{lean:90},head:{lean:-20},feet:null,hipsY:0.2,shift:[0.2,0],elbow:25,palm:'down'},
+  {name:'四足跪姿（桌面式）',arms:{sym:[[0.1,0,-1],[0.1,0,-1]]},legs:{sym:[[0.05,0,-1],[0,-1,0]]},hips:{bend:72},head:{bend:-35},feet:'back',shift:[0,-0.15],straightArms:true,hand:{sym:{dir:[0,1,0],palm:'down'}},fingers:'open'},
  ]},
 ];
 const ALL_POSES=Object.fromEntries(POSE_GROUPS.flatMap(g=>g.poses).map(p=>[p.name,p]));
-const D2R=Math.PI/180;
-const eul=(bend=0,twist=0,lean=0)=>new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),twist*D2R).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),bend*D2R)).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-lean*D2R));
+const D2R=Math.PI/180,V3=THREE.Vector3,Q=THREE.Quaternion;
+const axq=(ax,deg)=>new Q().setFromAxisAngle(ax,deg*D2R);
+const AX=new V3(1,0,0),AY=new V3(0,1,0),AZ=new V3(0,0,1);
+const eul=(bend=0,twist=0,lean=0)=>axq(AY,twist).multiply(axq(AX,bend)).multiply(axq(AZ,-lean));
 const inv=q=>q.clone().invert();
 /** 量測目前模型的靜止姿勢（須在 resetNormalizedPose 之後、尚未擺姿勢時呼叫一次） */
 function measure(vrm){
   vrm.humanoid.resetNormalizedPose();vrm.scene.updateMatrixWorld(true);
-  const N=n=>vrm.humanoid.getNormalizedBoneNode(n),P=n=>{const o=N(n);return o?o.getWorldPosition(new THREE.Vector3()):null;};
-  const sq=vrm.scene.getWorldQuaternion(new THREE.Quaternion());
+  const N=n=>vrm.humanoid.getNormalizedBoneNode(n),P=n=>{const o=N(n);return o?o.getWorldPosition(new V3()):null;};
+  const sq=vrm.scene.getWorldQuaternion(new Q());
   const m={Sq:sq,LS:P('leftUpperArm').x>0?1:-1,hips:P('hips'),hipsLocal:N('hips').position.clone(),
     ul:P('leftUpperLeg').distanceTo(P('leftLowerLeg')),ll:P('leftLowerLeg').distanceTo(P('leftFoot')),ankleY:P('leftFoot').y,has:{}};
   for(const b of['spine','chest','upperChest','neck','head','leftShoulder','rightShoulder'])m.has[b]=!!N(b);
+  for(const s of['left','right'])for(const f of['Index','Middle','Ring','Little'])for(const k of['Proximal','Intermediate','Distal'])m.has[s+f+k]=!!N(s+f+k);
   return m;
+}
+const bendToward=(w,e,deg)=>{let ax=new V3().crossVectors(w,e);if(ax.lengthSq()<1e-6)ax.set(1,0,0);return w.clone().applyQuaternion(axq(ax.normalize(),deg));};
+const angleDeg=(a,b)=>Math.acos(Math.max(-1,Math.min(1,a.dot(b))))/D2R;
+const PALM={in:s=>new V3(-s,0,0),out:s=>new V3(s,0,0),down:()=>new V3(0,-1,0),up:()=>new V3(0,1,0),forward:()=>new V3(0,0,1),back:()=>new V3(0,0,-1)};
+const pick=(v,key)=>v&&typeof v==='object'&&!Array.isArray(v)&&('L' in v||'R' in v||'sym' in v)?(v[key]!==undefined?v[key]:v.sym):v;
+/** 手的朝向：以手軸 a（單位向量）與期望手掌法線 n 建立座標系，回傳「靜止座標系→目標」的旋轉 */
+function handFrame(sg,a,n){
+  const rA=new V3(sg,0,0),rN=new V3(0,-1,0),rT=new V3().crossVectors(rA,rN);
+  let nn=n.clone().sub(a.clone().multiplyScalar(n.dot(a)));if(nn.lengthSq()<0.04)nn=new V3(0,-1,0).sub(a.clone().multiplyScalar(-a.y));if(nn.lengthSq()<1e-6)nn=new V3(0,0,1);
+  nn.normalize();const t=new V3().crossVectors(a,nn);
+  const Mr=new THREE.Matrix4().makeBasis(rA,rN,rT),Mt=new THREE.Matrix4().makeBasis(a,nn,t);
+  return new Q().setFromRotationMatrix(Mt.multiply(Mr.invert()));
 }
 /** 由姿勢定義算出每根骨頭的目標局部旋轉（k=1 時的最終姿勢）與臀部位移 */
 function computePose(vrm,def,m){
   const Sq=m.Sq,SqI=inv(Sq);
   const conj=q=>SqI.clone().multiply(q).multiply(Sq);   // 世界座標系的局部旋轉 → 節點局部旋轉
   const Lw={};                                            // 世界座標系的局部旋轉 L'
-  const t=def.torso||{},h=def.head||{};
+  const t={...(def.torso||{})},h={...(def.head||{})},hp0={...(def.hips||{})};
+  const natural=def.natural!==false&&!def.hips;
+  const W=def.contra==='L'?1:def.contra==='R'?-1:0;       // 重心側（+1＝角色左腿）
+  if(W){hp0.lean=(hp0.lean||0)+2.5*W;t.lean=(t.lean||0)-4*W;h.lean=(h.lean||0)+2*W;}
   const fr=m.has.upperChest?[0.3,0.35,0.35]:[0.5,0.5,0];
   const D={};
-  const tq=(f)=>eul((t.bend||0)*f,(t.twist||0)*f,(t.lean||0)*f);
-  const hp0=def.hips||{};Lw.hips=eul(hp0.bend||0,hp0.twist||0,hp0.lean||0);D.hips=Lw.hips.clone();
+  const base={spine:natural?[3,0,0]:[0,0,0],chest:natural?[2,0,0]:[0,0,0],upperChest:natural?[-3,0,0]:[0,0,0],neck:natural?[8,0,0]:[0,0,0],head:natural?[-6,0,0]:[0,0,0]};
+  Lw.hips=eul(hp0.bend||0,hp0.twist||0,hp0.lean||0);D.hips=Lw.hips.clone();
   let Dcur=D.hips.clone();
-  const bones=[['spine',fr[0]],['chest',fr[1]],['upperChest',fr[2]]];
-  for(const [b,f] of bones){if(!m.has[b]||f===0)continue;Lw[b]=tq(f);Dcur=Dcur.clone().multiply(Lw[b]);D[b]=Dcur.clone();}
+  for(const [b,f] of[['spine',fr[0]],['chest',fr[1]],['upperChest',fr[2]]]){
+    if(!m.has[b])continue;const bs=base[b];
+    Lw[b]=eul((t.bend||0)*f+bs[0],(t.twist||0)*f+bs[1],(t.lean||0)*f+bs[2]);Dcur=Dcur.clone().multiply(Lw[b]);D[b]=Dcur.clone();
+  }
   const Dtorso=Dcur.clone();
   const hf=m.has.neck?[0.4,0.6]:[0,1];
-  for(const [b,f] of[['neck',hf[0]],['head',hf[1]]]){if(!m.has[b]||f===0)continue;Lw[b]=eul((h.bend||0)*f,(h.twist||0)*f,(h.lean||0)*f);Dcur=Dcur.clone().multiply(Lw[b]);D[b]=Dcur.clone();}
+  for(const [b,f] of[['neck',hf[0]],['head',hf[1]]]){
+    if(!m.has[b]||f===0)continue;const bs=base[b];
+    Lw[b]=eul((h.bend||0)*f+bs[0],(h.twist||0)*f+bs[1],(h.lean||0)*f+bs[2]);Dcur=Dcur.clone().multiply(Lw[b]);D[b]=Dcur.clone();
+  }
   const out={};
-  // arms
   const sides=[['left','L',m.LS],['right','R',-m.LS]];
+  const F=new V3(0,0,1),B=new V3(0,0,-1);
+  // ---- arms
   const ar=def.arms||{};
   for(const [side,key,sg] of sides){
     const a=ar[key]||ar.sym;if(!a)continue;
-    const rest=new THREE.Vector3(sg,0,0);
-    const w1=new THREE.Vector3(sg*a[0][0],a[0][2],a[0][1]).normalize(),w2=new THREE.Vector3(sg*a[1][0],a[1][2],a[1][1]).normalize();
-    const D1=new THREE.Quaternion().setFromUnitVectors(rest,w1),D2=new THREE.Quaternion().setFromUnitVectors(rest,w2);
-    out[side+'UpperArm']=conj(inv(Dtorso).multiply(D1));out[side+'LowerArm']=conj(inv(D1).multiply(D2));
+    const rest=new V3(sg,0,0);
+    const w1=new V3(sg*a[0][0],a[0][2],a[0][1]).normalize();let w2=new V3(sg*a[1][0],a[1][2],a[1][1]).normalize();
+    if(!def.straightArms&&angleDeg(w1,w2)<6)w2=bendToward(w1,F,def.elbow??10);
+    const D1=new Q().setFromUnitVectors(rest,w1);let D2=new Q().setFromUnitVectors(rest,w2);
+    // hand: direction (default: continuation of the forearm) and palm normal
+    const hd=pick(def.hand,key);const hdir=hd&&hd.dir?new V3(sg*hd.dir[0],hd.dir[2],hd.dir[1]).normalize():w2.clone();
+    let palm=hd&&hd.palm?hd.palm:pick(def.palm,key);if(!palm)palm=(hdir.y<-0.6)?'in':'down';
+    const D3=handFrame(sg,hdir,PALM[palm](sg));
+    // forearm takes half of the twist between forearm and hand (the model has no twist bones)
+    const rel=inv(D2).multiply(D3),ax=new V3(sg,0,0),v=new V3(rel.x,rel.y,rel.z),p=ax.clone().multiplyScalar(v.dot(ax));
+    let tw=new Q(p.x,p.y,p.z,rel.w);if(tw.lengthSq()<1e-9)tw=new Q();else tw.normalize();
+    const half=new Q().slerp(tw,0.5);D2=D2.clone().multiply(half);
+    out[side+'UpperArm']=conj(inv(Dtorso).multiply(D1));out[side+'LowerArm']=conj(inv(D1).multiply(D2));out[side+'Hand']=conj(inv(D2).multiply(D3));
+    // fingers
+    const fg=pick(def.fingers,key)||'relaxed';
+    const curl={relaxed:[14,20,10],open:[0,0,0],fist:[78,92,60]};
+    ['Index','Middle','Ring','Little'].forEach((f,i)=>{
+      const mode=(fg==='point'&&i>0)?'fist':(fg==='point'?'open':fg);const c=curl[mode]||curl.relaxed;const extra=mode==='relaxed'?i*3:0;
+      ['Proximal','Intermediate','Distal'].forEach((k,j)=>{if(!m.has[side+f+k])return;out[side+f+k]=conj(axq(AZ,-sg*(c[j]+extra*(j===0?1:0.7))));});
+    });
   }
-  // legs
-  const lg=def.legs||{};const legDirs={};
-  const restLeg=new THREE.Vector3(0,-1,0);let drop=-1e9;
+  // ---- legs
+  const lg=def.legs||{};
+  const restLeg=new V3(0,-1,0);let drop=-1e9;
+  const kneeOf=(key)=>{let k=def.knee;if(k&&typeof k==='object')k=k[key];if(k===undefined)k=def.straightLegs?0:(W&&((W===1&&key==='R')||(W===-1&&key==='L'))?14:(W?3:6));return k;};
   for(const [side,key,sg] of sides){
     const a=lg[key]||lg.sym;if(!a)continue;
-    const w1=new THREE.Vector3(sg*a[0][0],a[0][2],a[0][1]).normalize(),w2=new THREE.Vector3(sg*a[1][0],a[1][2],a[1][1]).normalize();
-    const D1=new THREE.Quaternion().setFromUnitVectors(restLeg,w1),D2=new THREE.Quaternion().setFromUnitVectors(restLeg,w2);
+    let w1=new V3(sg*a[0][0],a[0][2],a[0][1]).normalize(),w2=new V3(sg*a[1][0],a[1][2],a[1][1]).normalize();
+    const kn=kneeOf(key);
+    if(kn>0&&angleDeg(w1,w2)<4){w1=bendToward(w1,F,kn/2);w2=bendToward(w1,F,-kn);}
+    const D1=new Q().setFromUnitVectors(restLeg,w1),D2=new Q().setFromUnitVectors(restLeg,w2);
     out[side+'UpperLeg']=conj(inv(D.hips).multiply(D1));out[side+'LowerLeg']=conj(inv(D1).multiply(D2));
-    let Df=new THREE.Quaternion();const fm=def.feet===undefined?'flat':def.feet;
-    const rx=(deg)=>new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),deg*D2R);
-    if(fm==='flat')Df=new THREE.Quaternion();else if(fm==='back')Df=rx(180);else if(fm==='up')Df=rx(-90);else if(fm==='down')Df=rx(90);else Df=null;
-    if(Df)out[side+'Foot']=conj(inv(D2).multiply(Df));
-    const kneeY=m.ul*w1.y,ankY=m.ul*w1.y+m.ll*w2.y;   // 相對於臀部
+    let fm=def.feet===undefined?'flat':def.feet;if(fm&&typeof fm==='object'&&('L' in fm||'R' in fm||'sym' in fm))fm=fm[key]!==undefined?fm[key]:fm.sym;
+    const LOC={point:65,relax:28,flex:-18};
+    if(typeof fm==='string'&&fm in LOC)fm={local:LOC[fm]};
+    if(fm&&typeof fm==='object'&&'local' in fm)out[side+'Foot']=conj(axq(AX,fm.local));
+    else{
+      let Df=null;
+      if(fm==='flat')Df=axq(AY,(def.footYaw??10)*sg);
+      else if(typeof fm==='number')Df=axq(AY,(def.footYaw??10)*sg).multiply(axq(AX,fm));
+      else if(fm==='back')Df=axq(AX,180);else if(fm==='up')Df=axq(AX,-90);else if(fm==='down')Df=axq(AX,90);
+      if(Df)out[side+'Foot']=conj(inv(D2).multiply(Df));
+    }
+    const kneeY=m.ul*w1.y,ankY=m.ul*w1.y+m.ll*w2.y;
     drop=Math.max(drop,m.ankleY-kneeY,m.ankleY-ankY);
   }
   for(const b of['spine','chest','upperChest','neck','head'])if(Lw[b])out[b]=conj(Lw[b]);
-  if(def.hips)out.hips=conj(Lw.hips);
+  if(hp0.bend||hp0.twist||hp0.lean)out.hips=conj(Lw.hips);
   const Lg=m.ul+m.ll;let hipsY=(drop>-1e8?drop:m.hips.y)+(def.hipsLift||0)*Lg;if(def.hipsY!==undefined)hipsY=def.hipsY*Lg;
-  const sh=def.shift||[0,0];
-  const off=new THREE.Vector3(sh[0]*Lg,hipsY-m.hips.y,sh[1]*Lg).applyQuaternion(SqI);
+  const sh=[...(def.shift||[0,0])];if(W)sh[0]+=W*m.LS*0.025;
+  const off=new V3(sh[0]*Lg,hipsY-m.hips.y,sh[1]*Lg).applyQuaternion(SqI);
   return {quats:out,hipsOffset:off};
 }
 /** 套用（k：0=靜止、1=完整姿勢）。呼叫前請先 resetNormalizedPose。 */
 function applyPoseK(vrm,comp,m,k){
-  const id=new THREE.Quaternion();
+  const id=new Q();
   for(const [b,q] of Object.entries(comp.quats)){const n=vrm.humanoid.getNormalizedBoneNode(b);if(n)n.quaternion.copy(id).slerp(q,k);}
   const hp=vrm.humanoid.getNormalizedBoneNode('hips');hp.position.copy(m.hipsLocal).addScaledVector(comp.hipsOffset,k);
 }
