@@ -116,7 +116,9 @@ const say=(t,err)=>{const e=$('msgt');e.textContent=t;e.style.background=err?'rg
 // 方向向量 = [out, fwd, up]：out＝遠離身體中線（左右自動鏡射）、fwd＝面向的前方、up＝向上。
 // arms / legs：{L:[上段方向, 下段方向], R:[...]} 或 sym:[上段, 下段]（左右對稱）。L／R 是角色自己的左／右。
 // torso / head：{bend, twist, lean} 角度；bend＋＝向前彎（低頭）、twist＋＝向角色左轉、lean＋＝向角色左傾。
-// feet：'flat'（腳底貼地，預設）| 'back'（腳背朝下、腳尖朝後，跪坐用）| null（不處理）。
+// feet：'flat'（腳底貼地，預設）| 'up'（腳尖朝上）| 'down'（腳尖朝下）| 'back'（腳背朝下、腳尖朝後）| null（不處理）。
+// hips：{bend,twist,lean} 整個身體（骨盆）的朝向，躺、趴、側撐用（bend＋＝身體向前傾倒，臉朝下）。
+// hipsY：臀部高度（以腿長為單位，覆蓋自動貼地）；shift：[dx,dz] 臀部水平位移（以腿長為單位）。
 // hipsLift：臀部額外抬高（公尺，依模型比例換算）；hips 的高度預設會自動讓腳或膝蓋貼地。
 const ARM_DOWN=[[0.25,0,-1],[0.25,0,-1]];
 const STAND=[[0.06,0,-1],[0.06,0,-1]];
@@ -132,6 +134,7 @@ const POSE_GROUPS=[
   {name:'雙手合十',arms:{sym:[[0.15,0.25,-1],[-0.5,0.7,0.5]]},legs:{sym:STAND}},
   {name:'單手按胸口（左手）',arms:{L:[[0.2,0.2,-1],[-1,0.45,0.3]],R:ARM_DOWN},legs:{sym:STAND}},
   {name:'雙手放肚子',arms:{sym:[[0.1,0.1,-1],[-0.5,0.8,-0.3]]},legs:{sym:STAND}},
+  {name:'雙手愛心（臉前）',arms:{sym:[[0.7,0.5,-0.2],[-0.55,0.75,0.35]]},legs:{sym:STAND}},
   {name:'雙臂前舉（殭屍）',arms:{sym:[[0,1,0],[0,1,0]]},legs:{sym:STAND}},
   {name:'張開雙臂（擁抱）',arms:{sym:[[0.6,0.7,0],[0.2,0.9,0]]},legs:{sym:STAND}},
   {name:'單手指向前方（左手）',arms:{L:[[0,1,0.1],[0,1,0.1]],R:ARM_DOWN},legs:{sym:STAND}},
@@ -141,6 +144,7 @@ const POSE_GROUPS=[
   {name:'雙手抱頭（手放腦後）',arms:{sym:[[0.85,-0.2,0.45],[-0.6,-0.55,0.6]]},legs:{sym:STAND}},
   {name:'敬禮（右手）',arms:{R:[[0.6,0.5,0],[-0.7,0.4,0.6]],L:ARM_DOWN},legs:{sym:STAND}},
   {name:'揮手（左手）',arms:{L:[[0.8,0.2,0.6],[0.1,0,1]],R:ARM_DOWN},legs:{sym:STAND}},
+  {name:'頭頂比愛心',arms:{sym:[[0.15,0.15,1],[-0.55,0.1,0.85]]},legs:{sym:STAND},head:{bend:8}},
   {name:'雙手高舉（Y 字）',arms:{sym:[[0.45,0,1],[0.45,0,1]]},legs:{sym:STAND}},
  ]},
  {group:'上身與頭部',poses:[
@@ -157,16 +161,29 @@ const POSE_GROUPS=[
   {name:'坐椅子',arms:{sym:[[0.12,0.3,-1],[-0.3,0.9,-0.4]]},legs:{sym:[[0.08,1,0],[0.04,0,-1]]}},
   {name:'深蹲',arms:{sym:[[0.2,0.9,0],[0.1,1,0]]},legs:{sym:[[0.25,0.85,0.45],[0,0.5,-0.87]]},torso:{bend:30}},
   {name:'跪坐（正坐）',arms:{sym:[[0.1,0.3,-1],[-0.3,0.9,-0.5]]},legs:{sym:[[0.1,0.9,-0.45],[0.0,-1,-0.1]]},feet:'back'},
+  {name:'M 字坐（雙膝抬起外開）',arms:{sym:[[0.15,0.4,-1],[-0.3,0.7,-0.6]]},legs:{sym:[[0.7,0.45,0.35],[-0.35,0.2,-0.9]]}},
   {name:'盤腿坐',arms:{sym:[[0.2,0.1,-1],[-0.1,0.9,-0.5]]},legs:{sym:[[0.8,0.6,0],[-0.9,0.4,-0.1]]},feet:null},
  ]},
  {group:'腿部動作',poses:[
   {name:'左右劈腿（一字馬）',arms:{sym:ARM_DOWN},legs:{sym:[[1,0,-0.03],[1,0,-0.03]]}},
+  {name:'I 字朝天蹬（站立劈腿）',arms:{L:[[0.2,0.5,0.8],[0,0.4,0.9]],R:[[0.9,0,0.2],[0.9,0,0.2]]},legs:{L:[[0,0.3,0.95],[0,0.3,0.95]],R:STAND},torso:{bend:-8},head:{bend:-10}},
   {name:'前後劈腿',arms:{sym:[[0.9,0,0.2],[0.9,0,0.2]]},legs:{L:[[0,1,-0.03],[0,1,-0.03]],R:[[0,-1,-0.03],[0,-1,-0.03]]}},
   {name:'弓步（左腳在前）',arms:{sym:[[0.1,0.4,-1],[-0.4,0.8,-0.3]]},legs:{L:[[0.05,0.85,-0.5],[0,0.1,-1]],R:[[0.05,-0.5,-0.85],[0,-0.9,-0.4]]}},
   {name:'抬腿踢（左腳）',arms:{sym:[[0.9,0,0.2],[0.9,0,0.2]]},legs:{L:[[0.1,1,0],[0.1,1,0]],R:STAND}},
   {name:'金雞獨立（左腳抬起）',arms:{sym:[[0.9,0,0.2],[0.9,0,0.2]]},legs:{L:[[0.05,1,0],[0,0,-1]],R:STAND}},
   {name:'跑步',arms:{L:[[0.2,-0.5,-0.85],[0,0.9,-0.3]],R:[[0.2,0.6,-0.75],[0,0.9,0.3]]},legs:{L:[[0.05,0.85,-0.5],[0,-0.4,-1]],R:[[0.05,-0.6,-0.8],[0,-0.9,-0.4]]},torso:{bend:10}},
   {name:'跳躍（半空）',arms:{sym:[[0.5,0,0.9],[0.5,0,0.9]]},legs:{sym:[[0.1,0.4,-0.9],[0,-0.8,-0.6]]},hipsLift:0.25},
+ ]},
+
+ {group:'瑜珈與地面姿勢',poses:[
+  {name:'棒式（手杖式，坐姿伸腿）',arms:{sym:[[0.15,0.1,-1],[0.1,0.3,-1]]},legs:{sym:[[0.03,1,0],[0.03,1,0]]},feet:'up'},
+  {name:'橋式（仰臥抬臀）',arms:{sym:[[0.15,1,-0.1],[0.15,1,-0.1]]},legs:{sym:[[0.1,0.8,0.55],[0,0.2,-1]]},hips:{bend:-125},head:{bend:20}},
+  {name:'平板式（高位撐體）',arms:{sym:[[0.12,0,-1],[0.12,0,-1]]},legs:{sym:[[0.05,-0.85,-0.52],[0.05,-0.85,-0.52]]},hips:{bend:90},head:{bend:-60},feet:'down',shift:[0,-0.25]},
+  {name:'側板式（手撐側撐）',arms:{L:[[0,0,-1],[0,0,-1]],R:[[0,0,1],[0,0,1]]},legs:{L:[[-0.85,0,-0.52],[-0.85,0,-0.52]],R:[[0.85,0,-0.48],[0.85,0,-0.48]]},hips:{lean:90},head:{lean:-70},feet:null,shift:[0.25,0]},
+  {name:'側棒式（前臂側撐）',arms:{L:[[0,0,-1],[0,1,-0.05]],R:[[0,0,1],[0,0,1]]},legs:{L:[[-0.96,0,-0.29],[-0.96,0,-0.29]],R:[[0.96,0,-0.27],[0.96,0,-0.27]]},hips:{lean:90},head:{lean:-70},feet:null,shift:[0.25,0]},
+  {name:'眼鏡蛇式',arms:{sym:[[0.12,0,-1],[0.12,0,-1]]},legs:{sym:[[0.05,-1,0],[0.05,-1,0]]},hips:{bend:90},torso:{bend:-58},head:{bend:-25},feet:'back',shift:[0,-0.25]},
+  {name:'側臥',arms:{L:[[1,0,0],[1,0,0]],R:[[1,0.2,-0.1],[1,0.2,-0.1]]},legs:{L:[[-0.9,0.4,-0.1],[-0.8,-0.3,-0.1]],R:[[0.9,0.4,-0.1],[0.8,-0.3,-0.1]]},hips:{lean:90},head:{lean:-20},feet:null,hipsY:0.2,shift:[0.2,0]},
+  {name:'四足跪姿（桌面式）',arms:{sym:[[0.1,0,-1],[0.1,0,-1]]},legs:{sym:[[0.05,0,-1],[0,-1,0]]},hips:{bend:72},head:{bend:-35},feet:'back',shift:[0,-0.15]},
  ]},
 ];
 const ALL_POSES=Object.fromEntries(POSE_GROUPS.flatMap(g=>g.poses).map(p=>[p.name,p]));
@@ -192,7 +209,7 @@ function computePose(vrm,def,m){
   const fr=m.has.upperChest?[0.3,0.35,0.35]:[0.5,0.5,0];
   const D={};
   const tq=(f)=>eul((t.bend||0)*f,(t.twist||0)*f,(t.lean||0)*f);
-  Lw.hips=eul(t.hipsBend||0,t.hipsTwist||0,t.hipsLean||0);D.hips=Lw.hips.clone();
+  const hp0=def.hips||{};Lw.hips=eul(hp0.bend||0,hp0.twist||0,hp0.lean||0);D.hips=Lw.hips.clone();
   let Dcur=D.hips.clone();
   const bones=[['spine',fr[0]],['chest',fr[1]],['upperChest',fr[2]]];
   for(const [b,f] of bones){if(!m.has[b]||f===0)continue;Lw[b]=tq(f);Dcur=Dcur.clone().multiply(Lw[b]);D[b]=Dcur.clone();}
@@ -219,15 +236,17 @@ function computePose(vrm,def,m){
     const D1=new THREE.Quaternion().setFromUnitVectors(restLeg,w1),D2=new THREE.Quaternion().setFromUnitVectors(restLeg,w2);
     out[side+'UpperLeg']=conj(inv(D.hips).multiply(D1));out[side+'LowerLeg']=conj(inv(D1).multiply(D2));
     let Df=new THREE.Quaternion();const fm=def.feet===undefined?'flat':def.feet;
-    if(fm==='flat')Df=new THREE.Quaternion();else if(fm==='back')Df=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),Math.PI);else Df=null;
+    const rx=(deg)=>new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),deg*D2R);
+    if(fm==='flat')Df=new THREE.Quaternion();else if(fm==='back')Df=rx(180);else if(fm==='up')Df=rx(-90);else if(fm==='down')Df=rx(90);else Df=null;
     if(Df)out[side+'Foot']=conj(inv(D2).multiply(Df));
     const kneeY=m.ul*w1.y,ankY=m.ul*w1.y+m.ll*w2.y;   // 相對於臀部
     drop=Math.max(drop,m.ankleY-kneeY,m.ankleY-ankY);
   }
   for(const b of['spine','chest','upperChest','neck','head'])if(Lw[b])out[b]=conj(Lw[b]);
-  if(Lw.hips&&(t.hipsBend||t.hipsTwist||t.hipsLean))out.hips=conj(Lw.hips);
-  const hipsY=(drop>-1e8?drop:m.hips.y)+(def.hipsLift||0)*(m.ul+m.ll);
-  const off=new THREE.Vector3(0,hipsY-m.hips.y,0).applyQuaternion(SqI);
+  if(def.hips)out.hips=conj(Lw.hips);
+  const Lg=m.ul+m.ll;let hipsY=(drop>-1e8?drop:m.hips.y)+(def.hipsLift||0)*Lg;if(def.hipsY!==undefined)hipsY=def.hipsY*Lg;
+  const sh=def.shift||[0,0];
+  const off=new THREE.Vector3(sh[0]*Lg,hipsY-m.hips.y,sh[1]*Lg).applyQuaternion(SqI);
   return {quats:out,hipsOffset:off};
 }
 /** 套用（k：0=靜止、1=完整姿勢）。呼叫前請先 resetNormalizedPose。 */
