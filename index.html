@@ -69,6 +69,9 @@ label.chk{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:non
   <div class="row"><label class="chk"><input type="checkbox" id="spr" checked>啟用彈簧骨</label><span class="grow"></span><button id="sprreset">重置彈簧</button></div>
   <div class="row"><label class="chk"><input type="checkbox" id="col">顯示碰撞體（紫色線框）</label></div>
 
+  <h2>打光與渲染</h2>
+  <div id="lightUI"></div>
+
   <h2>顯示</h2>
   <div class="row"><label class="chk"><input type="checkbox" id="grid" checked>地板格線</label><label class="chk"><input type="checkbox" id="skel">骨架</label><label class="chk"><input type="checkbox" id="wire">線框</label></div>
   <div class="row"><label class="chk"><input type="checkbox" id="rot">自動旋轉</label><span class="grow"></span><span class="sub">背景</span>
@@ -104,7 +107,7 @@ label.chk{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:non
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
-import {VRMLoaderPlugin,VRMUtils,VRMSpringBoneColliderHelper} from '@pixiv/three-vrm';
+import {VRMLoaderPlugin,VRMUtils,VRMSpringBoneColliderHelper,MToonMaterialDebugMode} from '@pixiv/three-vrm';
 import {VRMAnimationLoaderPlugin,createVRMAnimationClip,VRMLookAtQuaternionProxy} from '@pixiv/three-vrm-animation';
 const $=id=>document.getElementById(id);
 const say=(t,err)=>{const e=$('msgt');e.textContent=t;e.style.background=err?'rgba(180,40,40,.85)':'rgba(0,0,0,.65)';};
@@ -241,7 +244,11 @@ renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 const scene=new THREE.Scene();scene.background=new THREE.Color($('bg').value);
 const cam=new THREE.PerspectiveCamera(30,1,0.05,100);cam.position.set(0,1.2,5);
 const ctl=new OrbitControls(cam,cv);ctl.target.set(0,1,0);ctl.enableDamping=true;ctl.dampingFactor=0.12;
-const dl=new THREE.DirectionalLight(0xffffff,Math.PI*0.9);dl.position.set(1.5,3,3);scene.add(dl);scene.add(new THREE.AmbientLight(0xffffff,0.7));
+// 光源：主光 lKey、補光 lFill、輪廓光 lRim、環境光 lAmb（參數與面板在「打光與渲染」區塊）
+const lKey=new THREE.DirectionalLight(0xffffff,2.6),lFill=new THREE.DirectionalLight(0xffffff,0),lRim=new THREE.DirectionalLight(0xffffff,0),lAmb=new THREE.AmbientLight(0xffffff,0.7);
+for(const l of[lKey,lFill,lRim]){l.target.position.set(0,1,0);scene.add(l,l.target);}scene.add(lAmb);
+lKey.shadow.mapSize.set(2048,2048);Object.assign(lKey.shadow.camera,{left:-2.2,right:2.2,top:3,bottom:-1.2,near:0.5,far:20});lKey.shadow.bias=-0.0004;lKey.shadow.normalBias=0.02;
+const shadowFloor=new THREE.Mesh(new THREE.PlaneGeometry(12,12),new THREE.ShadowMaterial({opacity:0.4}));shadowFloor.rotation.x=-Math.PI/2;shadowFloor.receiveShadow=true;shadowFloor.visible=false;scene.add(shadowFloor);
 const grid=new THREE.GridHelper(10,20,0x667,0x445);scene.add(grid);
 function resize(){const r=$('stage').getBoundingClientRect();renderer.setSize(r.width,r.height,false);cam.aspect=r.width/r.height;cam.updateProjectionMatrix();}
 addEventListener('resize',resize);resize();
@@ -265,10 +272,11 @@ async function loadVRM(url,name){
     VRMUtils.rotateVRM0(vrm);                     // VRM0.x 預設面向 -Z，轉成面向 +Z
     vrm.scene.traverse(o=>{o.frustumCulled=false;});
     scene.add(vrm.scene);sprMgr=vrm.springBoneManager;
+    vrm.scene.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;}});
     try{if(vrm.lookAt){const p=new VRMLookAtQuaternionProxy(vrm.lookAt);p.name='lookAtQuaternionProxy';vrm.scene.add(p);}}catch(e){}
     mixer=new THREE.AnimationMixer(vrm.scene);
     poseM=measure(vrm);vrm.humanoid.resetNormalizedPose();
-    rebuildHelpers();applyDisplay();fitView();buildExpressions();updateInfo();
+    rebuildHelpers();applyDisplay();fitView();buildExpressions();applyModelRender();updateInfo();
     $('empty').hidden=true;say(`已載入 ${name}`);
     if(keepVrma){await applyVrma(keepVrma.anim,keepVrma.name);}
   }catch(e){console.error(e);say('載入失敗：'+(e.message||e),true);}
@@ -362,6 +370,70 @@ function exprTick(dt){
   }
   for(const [n,v] of manual)em.setValue(n,v);
 }
+// ---------- lighting & rendering（打光與渲染）
+const TONES=[['無（預設）',THREE.NoToneMapping],['Linear',THREE.LinearToneMapping],['Reinhard',THREE.ReinhardToneMapping],['Cineon',THREE.CineonToneMapping],['ACES Filmic',THREE.ACESFilmicToneMapping],['AgX',THREE.AgXToneMapping],['Neutral',THREE.NeutralToneMapping]];
+const LP={ // 預設組合：key/fill/rim 強度、主光方位(0=正面,+向角色左)與仰角、環境光、陰影、曝光
+ '預設（柔和斜光）':{k:2.6,az:27,el:42,fill:0,rim:0,amb:0.7,shadow:false,expo:1},
+ '正面柔光':{k:1.8,az:0,el:20,fill:0.6,rim:0,amb:1.0,shadow:false,expo:1},
+ '側光（戲劇）':{k:3.2,az:80,el:25,fill:0.15,rim:0,amb:0.25,shadow:true,expo:1},
+ '逆光（輪廓）':{k:1.2,az:20,el:30,fill:0.2,rim:3.0,amb:0.5,shadow:false,expo:1},
+ '頂光':{k:3.0,az:0,el:80,fill:0,rim:0,amb:0.4,shadow:true,expo:1},
+ '三點打光（攝影棚）':{k:2.4,az:40,el:35,fill:0.9,rim:1.6,amb:0.35,shadow:true,expo:1},
+ '平光（只看顏色）':{k:0,az:0,el:0,fill:0,rim:0,amb:2.4,shadow:false,expo:1},
+};
+const LS={k:2.6,az:27,el:42,col:'#ffffff',fill:0,rim:0,amb:0.7,expo:1,tone:0,shadow:false,soft:2,outline:true,outW:1,fov:30,res:1,debug:'none'};
+const LCTL=[ // [key, label, min, max, step]
+ ['k','主光強度',0,5,0.05],['az','主光方位（0＝正面）',-180,180,1],['el','主光仰角',-10,90,1],['fill','補光強度（主光對側）',0,3,0.05],['rim','輪廓光強度（背後）',0,4,0.05],['amb','環境光',0,3,0.05],
+ ['expo','曝光',0.2,3,0.05],['soft','陰影柔和度',0,8,0.5],['outW','輪廓線粗細（倍率）',0,4,0.05],['fov','視角 FOV',15,70,1]];
+function lightPos(l,az,el,dist=6){const a=az*Math.PI/180,e=el*Math.PI/180;l.position.set(Math.sin(a)*Math.cos(e)*dist,1+Math.sin(e)*dist,Math.cos(a)*Math.cos(e)*dist);}
+function applyLight(){
+  lKey.intensity=LS.k;lKey.color.set(LS.col);lightPos(lKey,LS.az,LS.el);
+  lFill.intensity=LS.fill;lFill.color.set(LS.col);lightPos(lFill,-LS.az*0.8-30,15);
+  lRim.intensity=LS.rim;lRim.color.set('#ffffff');lightPos(lRim,LS.az+180,35);
+  lAmb.intensity=LS.amb;renderer.toneMapping=TONES[LS.tone][1];renderer.toneMappingExposure=LS.expo;
+  const sh=!!LS.shadow;if(renderer.shadowMap.enabled!==sh){renderer.shadowMap.enabled=sh;renderer.shadowMap.type=THREE.PCFSoftShadowMap;scene.traverse(o=>{if(o.material)[].concat(o.material).forEach(m=>m.needsUpdate=true);});}
+  lKey.castShadow=sh;lKey.shadow.radius=LS.soft;shadowFloor.visible=sh;
+  cam.fov=LS.fov;cam.updateProjectionMatrix();renderer.setPixelRatio(Math.min(devicePixelRatio*LS.res,3));resize();
+  applyModelRender();
+}
+function applyModelRender(){   // 輪廓線與 MToon 偵錯模式（作用在目前模型的所有 MToon 材質）
+  if(!vrm)return;
+  vrm.scene.traverse(o=>{if(!o.isMesh)return;[].concat(o.material).forEach(m=>{
+    if(!m||!m.isMToonMaterial)return;
+    if(m.isOutline){if(m.userData.w0===undefined)m.userData.w0=m.outlineWidthFactor;m.visible=LS.outline&&LS.outW>0;m.outlineWidthFactor=m.userData.w0*LS.outW;}
+    else{if(m.debugMode!==LS.debug){m.debugMode=LS.debug;m.needsUpdate=true;}}
+  });});
+}
+(function buildLightUI(){
+  const box=$('lightUI');if(!box)return;const els={};
+  const mk=(tag,props)=>Object.assign(document.createElement(tag),props);
+  const row=mk('div',{className:'row'});
+  const sel=mk('select',{id:'lPreset',className:'grow','aria-label':'打光預設'});for(const k of Object.keys(LP))sel.appendChild(mk('option',{textContent:k}));
+  row.appendChild(sel);box.appendChild(row);
+  const sync=()=>{for(const [k,lab,mn,mx,st] of LCTL){els[k].r.value=LS[k];els[k].v.textContent=(+LS[k]).toFixed(st<1?2:0);}$('lCol').value=LS.col;$('lShadow').checked=LS.shadow;};
+  for(const [k,lab,mn,mx,st] of LCTL){
+    const wrap=mk('div');wrap.style.cssText='display:grid;grid-template-columns:1fr 44px;gap:6px;align-items:center';
+    const l=mk('label',{textContent:lab});l.style.fontSize='13px';const v=mk('span',{className:'sub'});v.style.textAlign='right';
+    const r=mk('input',{type:'range',min:mn,max:mx,step:st,id:'l_'+k});r.style.gridColumn='1 / span 2';
+    r.oninput=()=>{LS[k]=+r.value;v.textContent=(+r.value).toFixed(st<1?2:0);applyLight();};
+    els[k]={r,v};wrap.append(l,v,r);box.appendChild(wrap);
+  }
+  const r2=mk('div',{className:'row'});
+  r2.innerHTML='<label class="chk"><input type="checkbox" id="lShadow">投射陰影</label><label class="chk">主光顏色 <input type="color" id="lCol" value="#ffffff"></label><label class="chk"><input type="checkbox" id="lOutline" checked>輪廓線</label>';
+  box.appendChild(r2);
+  const r3=mk('div',{className:'row'});
+  r3.innerHTML='<span class="sub">色調映射</span><select id="lTone" class="grow"></select><span class="sub">解析度</span><select id="lRes"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>';
+  box.appendChild(r3);
+  const r4=mk('div',{className:'row'});r4.innerHTML='<span class="sub">MToon 偵錯檢視</span><select id="lDebug" class="grow"></select>';box.appendChild(r4);
+  box.appendChild(mk('div',{className:'sub',textContent:'陰影需要打開「投射陰影」；偵錯檢視可看法線、UV、明暗分界比例。'}));
+  TONES.forEach(([n],i)=>$('lTone').appendChild(mk('option',{textContent:n,value:i})));
+  for(const [n,v] of Object.entries(MToonMaterialDebugMode))$('lDebug').appendChild(mk('option',{textContent:({None:'無',Normal:'法線',LitShadeRate:'明暗比例',UV:'UV'})[n]||n,value:v}));
+  sel.onchange=()=>{const p=LP[sel.value];Object.assign(LS,{k:p.k,az:p.az,el:p.el,fill:p.fill,rim:p.rim,amb:p.amb,shadow:p.shadow,expo:p.expo,col:'#ffffff'});sync();applyLight();};
+  $('lShadow').onchange=()=>{LS.shadow=$('lShadow').checked;applyLight();};$('lCol').oninput=()=>{LS.col=$('lCol').value;applyLight();};
+  $('lOutline').onchange=()=>{LS.outline=$('lOutline').checked;applyLight();};
+  $('lTone').onchange=()=>{LS.tone=+$('lTone').value;applyLight();};$('lRes').onchange=()=>{LS.res=+$('lRes').value;applyLight();};$('lDebug').onchange=()=>{LS.debug=$('lDebug').value;applyLight();};
+  sync();applyLight();
+})();
 // ---------- physics / display
 $('spr').onchange=()=>{if(!vrm)return;vrm.springBoneManager=$('spr').checked?sprMgr:null;if($('spr').checked&&sprMgr)sprMgr.reset();};
 $('sprreset').onclick=()=>{if(sprMgr)sprMgr.reset();};

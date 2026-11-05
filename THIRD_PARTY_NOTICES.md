@@ -13,4 +13,4 @@ three-vrm_test (moves the right upper arm only)
 - three.js 0.184.0 — MIT — https://github.com/mrdoob/three.js
 - @pixiv/three-vrm 3.5.5 and @pixiv/three-vrm-animation 3.5.5 — MIT — https://github.com/pixiv/three-vrm
 
-The viewer code itself has no license file yet; all rights reserved by the author unless stated otherwise.
+The viewer code itself is MIT-licensed (see LICENSE). The licenses above apply to the third-party items listed here.
