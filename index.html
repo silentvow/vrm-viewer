@@ -33,10 +33,15 @@ label.chk{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:non
 .pill{font-size:12px;color:var(--fg);border:1px solid var(--line);background:var(--panel2);border-radius:99px;padding:5px 12px;cursor:pointer}
 .pill.main{background:var(--acc);color:var(--acc-fg);border-color:var(--acc);font-weight:600}
 @media (max-width:760px){body{flex-direction:column}#side{width:100%;max-width:none;max-height:46vh;border-right:0;border-bottom:1px solid var(--line)}}
+details.sec{margin:10px 0 0;border-top:1px solid var(--line)}
+details.sec>summary{list-style:none;cursor:pointer;font-size:12px;letter-spacing:.06em;color:var(--dim);padding:9px 0 6px;user-select:none;display:flex;align-items:center;gap:6px}
+details.sec>summary::-webkit-details-marker{display:none}
+details.sec>summary::before{content:"▸";display:inline-block;width:1em;transition:transform .15s}
+details.sec[open]>summary::before{transform:rotate(90deg)}
+details.sec>summary:hover{color:var(--fg)}
 </style>
 </head>
 <body>
-
 <div id="side">
   <h1>VRM 檢視器</h1>
   <div class="sub">在瀏覽器裡檢視 VRM 模型、播放 VRMA 動作、擺測試姿勢、調表情。檔案只在你的瀏覽器內讀取，不會上傳。</div>
@@ -81,6 +86,23 @@ label.chk{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:non
   <h2>資訊</h2>
   <div id="info">（尚未載入）</div>
 </div>
+<script>
+// 左側面板：每個 h2 區段做成可摺疊（accordion），預設只展開 VRM／VRMA／測試姿勢／資訊；狀態記在 localStorage
+(function(){
+  var OPEN=['VRM 模型','VRMA 動作','測試姿勢','資訊'],KEY='vrmviewer.sections',saved={};
+  try{saved=JSON.parse(localStorage.getItem(KEY)||'{}')}catch(e){}
+  var side=document.getElementById('side');
+  Array.prototype.slice.call(side.querySelectorAll('h2')).forEach(function(h){
+    var d=document.createElement('details'),sm=document.createElement('summary'),name=h.textContent.trim();
+    d.className='sec';sm.textContent=name;d.appendChild(sm);
+    var n=h.nextSibling;h.parentNode.insertBefore(d,h);
+    while(n&&!(n.nodeType===1&&n.tagName==='H2')){var nx=n.nextSibling;d.appendChild(n);n=nx}
+    h.remove();
+    d.open=(name in saved)?saved[name]:OPEN.some(function(o){return name.indexOf(o)===0});
+    d.addEventListener('toggle',function(){saved[name]=d.open;try{localStorage.setItem(KEY,JSON.stringify(saved))}catch(e){}});
+  });
+})();
+</script>
 <div id="stage"><canvas id="cv"></canvas>
   <div id="empty"><strong>尚未載入 VRM</strong><span>按左側「選擇 VRM 檔案…」，或把 .vrm 檔拖到這裡。</span><span>載入後可播放內建動作、擺姿勢、調表情。</span></div>
   <div id="drop">放開以載入 .vrm / .vrma</div><div id="msg"><span id="msgt">準備中…</span></div></div>
@@ -345,7 +367,7 @@ const cv=$('cv');const renderer=new THREE.WebGLRenderer({canvas:cv,antialias:tru
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 const scene=new THREE.Scene();scene.background=new THREE.Color($('bg').value);
 const cam=new THREE.PerspectiveCamera(30,1,0.05,100);cam.position.set(0,1.2,5);
-const ctl=new OrbitControls(cam,cv);ctl.target.set(0,1,0);ctl.enableDamping=true;ctl.dampingFactor=0.12;
+const ctl=new OrbitControls(cam,cv);ctl.target.set(0,1,0);ctl.enableDamping=true;ctl.dampingFactor=0.12;window.__ctl=ctl;window.__cam=cam;
 // 光源：主光 lKey、補光 lFill、輪廓光 lRim、環境光 lAmb（參數與面板在「打光與渲染」區塊）
 const lKey=new THREE.DirectionalLight(0xffffff,2.6),lFill=new THREE.DirectionalLight(0xffffff,0),lRim=new THREE.DirectionalLight(0xffffff,0),lAmb=new THREE.AmbientLight(0xffffff,0.7);
 for(const l of[lKey,lFill,lRim]){l.target.position.set(0,1,0);scene.add(l,l.target);}scene.add(lAmb);
@@ -356,7 +378,7 @@ function resize(){const r=$('stage').getBoundingClientRect();renderer.setSize(r.
 addEventListener('resize',resize);resize();
 // ---------- loaders
 const loader=new GLTFLoader();loader.register(p=>new VRMLoaderPlugin(p));loader.register(p=>new VRMAnimationLoaderPlugin(p));
-let vrm=null,mixer=null,action=null,clip=null,playing=true,sprMgr=null,colHelpers=[],skelHelper=null,vrmName='',vrmaName='',poseK=null;
+let vrm=null,mixer=null,action=null,clip=null,playing=true,sprMgr=null,colHelpers=[],skelHelper=null,vrmName='',vrmaName='',poseK=null;window.__scene=scene;window.__THREE=THREE;Object.defineProperty(window,"__vrm",{get:()=>vrm});
 function loadGLTF(buf,label){
   return new Promise((res,rej)=>{say(`${label} 解析中…`);loader.parse(buf,'',res,rej);});
 }
@@ -585,5 +607,3 @@ function tick(){
 }
 tick();
 </script>
-</body>
-</html>
