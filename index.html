@@ -88,6 +88,9 @@ details.sec>summary:hover{color:var(--fg)}
   <div class="row"><button id="pickHide">隱藏選取的三角面</button><button id="pickRestore">還原全部</button><button id="pickCopy">複製資訊</button></div>
   <div class="sub">用來找「某個黑點／破面是哪個網格、哪個三角面、哪個材質造成的」：先看第一筆（最前面的），再用「隱藏」確認黑點是否消失。外框線（Outline）是另一個材質，可在下方清單單獨關。</div>
   <div id="pickOut" style="white-space:pre-wrap;font:12px/1.5 ui-monospace,Consolas,monospace;color:var(--dim);background:var(--panel2);border-radius:8px;padding:8px 10px;margin-top:6px;max-height:260px;overflow:auto">（尚未點選）</div>
+  <div class="row"><button id="seamRun">接縫掃描（跑全部測試姿勢）</button></div>
+  <div class="sub">對「目前選取的網格」（先在上面點選一下；沒選就用 Body）：找出不同殼之間邊界靠近（≤15 mm）的頂點對，逐一套用 59 組測試姿勢，量這些頂點對分開了多少。數字越大越容易看到縫裂開。</div>
+  <div id="seamOut" style="white-space:pre-wrap;font:12px/1.5 ui-monospace,Consolas,monospace;color:var(--dim);background:var(--panel2);border-radius:8px;padding:8px 10px;margin-top:6px;max-height:300px;overflow:auto">（尚未掃描）</div>
   <div class="row"><button id="meshRefresh">更新網格清單</button></div>
   <div id="meshList" style="font-size:12px"></div>
 
@@ -656,7 +659,48 @@ if($('pickOn')){(function(){
       box.append(row);
     }
   }
+
+  // ---- 接縫掃描
+  async function seamScan(){
+    const out=$('seamOut');if(!vrm){out.textContent='請先載入 VRM';return;}
+    let mesh=sel&&sel.object&&sel.object.isSkinnedMesh?sel.object:null;if(!mesh)vrm.scene.traverse(o=>{if(!mesh&&o.isSkinnedMesh&&o.name==='Body')mesh=o;});
+    if(!mesh){out.textContent='找不到 Body 蒙皮網格（先點選一個蒙皮網格）';return;}
+    out.textContent='分析 '+mesh.name+' …';await new Promise(r=>setTimeout(r,30));
+    const g=mesh.geometry,P=g.attributes.position,I=g.index,n=P.count,nf=I.count/3;
+    const key=i=>Math.round(P.getX(i)*1e4)+','+Math.round(P.getY(i)*1e4)+','+Math.round(P.getZ(i)*1e4);
+    const wmap=new Map(),wrep=new Int32Array(n);for(let i=0;i<n;i++){const k=key(i);if(!wmap.has(k))wmap.set(k,i);wrep[i]=wmap.get(k);}
+    const par=new Int32Array(n).map((_,i)=>i);const find=a=>{while(par[a]!==a){par[a]=par[par[a]];a=par[a];}return a;};
+    const uni=(a,b)=>{a=find(a);b=find(b);if(a!==b)par[Math.max(a,b)]=Math.min(a,b);};
+    const ec=new Map();
+    for(let f=0;f<nf;f++){const v=[wrep[I.getX(f*3)],wrep[I.getX(f*3+1)],wrep[I.getX(f*3+2)]];if(v[0]===v[1]||v[1]===v[2]||v[0]===v[2])continue;uni(v[0],v[1]);uni(v[1],v[2]);for(const [a,b] of [[v[0],v[1]],[v[1],v[2]],[v[2],v[0]]]){const k=Math.min(a,b)+'_'+Math.max(a,b);ec.set(k,(ec.get(k)||0)+1);}}
+    const bset=new Set();for(const [k,c] of ec)if(c===1){const [a,b]=k.split('_').map(Number);bset.add(a);bset.add(b);}
+    const shell=i=>find(wrep[i]);const vs=[...bset];
+    const cell=0.015,grid=new Map(),cp=i=>[Math.floor(P.getX(i)/cell),Math.floor(P.getY(i)/cell),Math.floor(P.getZ(i)/cell)];
+    for(const i of vs){const c=cp(i).join(',');(grid.get(c)||grid.set(c,[]).get(c)).push(i);}
+    const pairs=new Map();
+    for(const i of vs){const [cx,cy,cz]=cp(i);let best=-1,bd=cell;for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)for(let dz=-1;dz<=1;dz++){const l=grid.get((cx+dx)+','+(cy+dy)+','+(cz+dz));if(!l)continue;for(const j of l){if(shell(j)===shell(i))continue;const d=Math.hypot(P.getX(i)-P.getX(j),P.getY(i)-P.getY(j),P.getZ(i)-P.getZ(j));if(d<bd){bd=d;best=j;}}}
+      if(best>=0)pairs.set(Math.min(i,best)+'_'+Math.max(i,best),[Math.min(i,best),Math.max(i,best)]);}
+    const pl=[...pairs.values()];if(!pl.length){out.textContent='沒有找到跨殼的接縫頂點對';return;}
+    const sc=new Map();for(let i=0;i<n;i++){const s=shell(i);const e=sc.get(s)||sc.set(s,{n:0,y0:9,y1:-9,x:0}).get(s);e.n++;e.y0=Math.min(e.y0,P.getY(i));e.y1=Math.max(e.y1,P.getY(i));e.x+=P.getX(i);}
+    const lab=s=>{const e=sc.get(s);return `殼${s}(${e.n}頂點,y ${e.y0.toFixed(2)}~${e.y1.toFixed(2)},x≈${(e.x/e.n).toFixed(2)})`;};
+    const a=new THREE.Vector3(),c=new THREE.Vector3();
+    const sep=()=>{vrm.scene.updateMatrixWorld(true);mesh.skeleton.update();const r=new Float32Array(pl.length);pl.forEach((p,k)=>{mesh.getVertexPosition(p[0],a);mesh.getVertexPosition(p[1],c);r[k]=a.distanceTo(c);});return r;};
+    vrm.humanoid.resetNormalizedPose();vrm.update(0.001);const s0=sep(),mx=new Float32Array(pl.length),who=new Array(pl.length).fill('');
+    const names=Object.keys(ALL_POSES);let done=0;
+    for(const nm of names){startPose(nm);if(poseK&&poseM)applyPoseK(vrm,poseK.comp,poseM,1);vrm.update(0.001);const s=sep();for(let k=0;k<s.length;k++){const d=s[k]-s0[k];if(d>mx[k]){mx[k]=d;who[k]=nm;}}
+      if(++done%6===0){out.textContent=`掃描中 ${done}/${names.length} …`;await new Promise(r=>setTimeout(r,0));}}
+    startPose('T-pose（回初始）');
+    const grp=new Map();pl.forEach((p,k)=>{const sa=shell(p[0]),sb=shell(p[1]),key=Math.min(sa,sb)+'|'+Math.max(sa,sb);const e=grp.get(key)||grp.set(key,{sa:Math.min(sa,sb),sb:Math.max(sa,sb),n:0,max:0,g5:0,g10:0,g20:0,who:'',sum:0}).get(key);e.n++;e.sum+=mx[k];if(mx[k]>e.max){e.max=mx[k];e.who=who[k];}if(mx[k]>0.005)e.g5++;if(mx[k]>0.01)e.g10++;if(mx[k]>0.02)e.g20++;});
+    const rows=[...grp.values()].filter(e=>e.max>0.005).sort((x,y)=>y.max-x.max).slice(0,25);
+    window.__seamResult={pl,mx,who,shell:i=>shell(i)};
+    out.textContent=`${mesh.name}：${pl.length} 組頂點對、${names.length} 個姿勢
+（分開量 = 該姿勢下距離 − T 字站姿下的距離；>5 mm 通常看得到縫）
+`+(rows.length?rows.map(e=>`${lab(e.sa)} ↔ ${lab(e.sb)}
+   ${e.n} 對；最大 ${(e.max*1000).toFixed(1)} mm（${e.who}）；>5mm ${e.g5}、>10mm ${e.g10}、>20mm ${e.g20}`).join('\n'):'所有接縫的分開量都 ≤ 5 mm');
+  }
+  $('seamRun').onclick=()=>{seamScan().catch(e=>{$('seamOut').textContent='錯誤：'+e.message;});};
   $('meshRefresh').onclick=listMeshes;
 })();}
+window.__ALL_POSES=ALL_POSES;window.__startPose=startPose;window.__render=()=>{ctl.update();renderer.render(scene,cam);};window.__finishPose=()=>{if(poseK&&poseM)applyPoseK(vrm,poseK.comp,poseM,1);vrm.update(0.001);};
 tick();
 </script>
