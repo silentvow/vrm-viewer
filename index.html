@@ -83,6 +83,14 @@ details.sec>summary:hover{color:var(--fg)}
     <select id="bg"><option value="#2b2e36">深灰</option><option value="#8f95a3">中灰</option><option value="#f2f2f2">白</option><option value="#00b140">綠幕</option><option value="#101216">黑</option></select></div>
   <div class="row"><button data-v="front">正面</button><button data-v="side">側面</button><button data-v="back">背面</button><button data-v="top">俯視</button><button id="fit">取景</button></div>
 
+  <h2>檢查（點選模型）</h2>
+  <div class="row"><label class="chk"><input type="checkbox" id="pickOn">點選模式（在畫面上點一下，列出該點的所有三角面）</label></div>
+  <div class="row"><button id="pickHide">隱藏選取的三角面</button><button id="pickRestore">還原全部</button><button id="pickCopy">複製資訊</button></div>
+  <div class="sub">用來找「某個黑點／破面是哪個網格、哪個三角面、哪個材質造成的」：先看第一筆（最前面的），再用「隱藏」確認黑點是否消失。外框線（Outline）是另一個材質，可在下方清單單獨關。</div>
+  <div id="pickOut" style="white-space:pre-wrap;font:12px/1.5 ui-monospace,Consolas,monospace;color:var(--dim);background:var(--panel2);border-radius:8px;padding:8px 10px;margin-top:6px;max-height:260px;overflow:auto">（尚未點選）</div>
+  <div class="row"><button id="meshRefresh">更新網格清單</button></div>
+  <div id="meshList" style="font-size:12px"></div>
+
   <h2>資訊</h2>
   <div id="info">（尚未載入）</div>
 </div>
@@ -605,5 +613,50 @@ function tick(){
   }
   ctl.update();renderer.render(scene,cam);
 }
+
+// ---------- 點選檢查：點模型 -> 列出命中的網格／三角面／材質／UV；可隱藏三角面、單獨關網格或外框線
+if($('pickOn')){(function(){
+  const rc=new THREE.Raycaster(),saved=new Map();let sel=null,hl=null,down=null;
+  const meshes=()=>{const a=[];if(vrm)vrm.scene.traverse(o=>{if(o.isMesh)a.push(o)});return a;};
+  const matOf=(o,gi)=>Array.isArray(o.material)?o.material[gi]:o.material;
+  function clearHl(){if(hl){scene.remove(hl);hl.geometry.dispose();hl.material.dispose();hl=null;}}
+  function showTri(o,f){
+    clearHl();const I=o.geometry.index,v=[0,1,2].map(k=>I?I.getX(f*3+k):f*3+k),pts=v.map(i=>{const p=new THREE.Vector3();(o.getVertexPosition?o.getVertexPosition(i,p):p.fromBufferAttribute(o.geometry.attributes.position,i));return p.applyMatrix4(o.matrixWorld);});
+    hl=new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:0xff2060,depthTest:false}));hl.renderOrder=999;scene.add(hl);
+  }
+  function describe(h){
+    const o=h.object,g=o.geometry,f=h.faceIndex,I=g.index,v=[0,1,2].map(k=>I?I.getX(f*3+k):f*3+k),P=g.attributes.position,N=g.attributes.normal,U=g.attributes.uv;
+    const p=v.map(i=>new THREE.Vector3(P.getX(i),P.getY(i),P.getZ(i))),fn=p[1].clone().sub(p[0]).cross(p[2].clone().sub(p[0]));const area=fn.length()/2;fn.normalize();
+    const dots=N?v.map(i=>(fn.x*N.getX(i)+fn.y*N.getY(i)+fn.z*N.getZ(i)).toFixed(2)):[];
+    const m=matOf(o,h.face.materialIndex);
+    return `${o.name}  三角面 #${f}  材質「${m&&m.name}」  距離 ${h.distance.toFixed(3)}
+   UV (${h.uv?h.uv.x.toFixed(3)+', '+h.uv.y.toFixed(3):'-'})  面積 ${(area*1e4).toFixed(2)} cm²  頂點 ${v.join(',')}
+   頂點法線·面法線 ${dots.join(' / ')}${dots.some(d=>+d<0.2)?'  ← 法線與面不一致':''}`;
+  }
+  function doPick(e){
+    const r=cv.getBoundingClientRect();rc.setFromCamera(new THREE.Vector2(((e.clientX-r.left)/r.width)*2-1,-((e.clientY-r.top)/r.height)*2+1),cam);
+    const raw=rc.intersectObjects(meshes(),false),seen=new Set(),hits=[];
+    for(const h of raw){const m=matOf(h.object,h.face.materialIndex),k=h.object.uuid+'#'+h.faceIndex;if(seen.has(k)){const prev=hits.find(x=>x.k===k);if(prev&&m&&/Outline/.test(m.name))prev.outline=true;continue;}seen.add(k);hits.push({k,h,outline:!!(m&&/Outline/.test(m.name))});}
+    const top=hits.slice(0,8);sel=top[0]?top[0].h:null;
+    $('pickOut').textContent=top.length?top.map((x,i)=>`${i+1}. ${describe(x.h)}${x.outline?'  （含外框線）':''}`).join('\n'):'沒有點到任何東西';
+    if(sel)showTri(sel.object,sel.faceIndex);else clearHl();
+  }
+  cv.addEventListener('pointerdown',e=>{down=[e.clientX,e.clientY];});
+  cv.addEventListener('pointerup',e=>{if($('pickOn').checked&&down&&Math.hypot(e.clientX-down[0],e.clientY-down[1])<4)doPick(e);});
+  $('pickOn').onchange=()=>{if(!$('pickOn').checked)clearHl();else listMeshes();};
+  $('pickHide').onclick=()=>{if(!sel)return;const g=sel.object.geometry,I=g.index;if(!I)return;if(!saved.has(g))saved.set(g,I.array.slice());const a=I.array[sel.faceIndex*3];I.array[sel.faceIndex*3+1]=a;I.array[sel.faceIndex*3+2]=a;I.needsUpdate=true;clearHl();$('pickOut').textContent+='\n→ 已隱藏 '+sel.object.name+' #'+sel.faceIndex+'（實際上是把它變成退化三角面）';};
+  $('pickRestore').onclick=()=>{saved.forEach((arr,g)=>{g.index.array.set(arr);g.index.needsUpdate=true;});saved.clear();clearHl();};
+  $('pickCopy').onclick=()=>navigator.clipboard&&navigator.clipboard.writeText($('pickOut').textContent);
+  function listMeshes(){
+    const box=$('meshList');box.textContent='';
+    for(const o of meshes()){
+      const row=document.createElement('div');row.className='row';const l=document.createElement('label');l.className='chk';const c=document.createElement('input');c.type='checkbox';c.checked=o.visible;c.onchange=()=>{o.visible=c.checked;};l.append(c,o.name);row.append(l);
+      const outl=Array.isArray(o.material)?o.material.filter(m=>/Outline/.test(m.name)):[];
+      if(outl.length){const l2=document.createElement('label');l2.className='chk';const c2=document.createElement('input');c2.type='checkbox';c2.checked=outl[0].visible;c2.onchange=()=>outl.forEach(m=>{m.visible=c2.checked;});l2.append(c2,'外框線');const sp=document.createElement('span');sp.className='grow';row.append(sp,l2);}
+      box.append(row);
+    }
+  }
+  $('meshRefresh').onclick=listMeshes;
+})();}
 tick();
 </script>
