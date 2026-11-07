@@ -164,10 +164,10 @@ const say=(t,err)=>{const e=$('msgt');e.textContent=t;e.style.background=err?'rg
 //  · feet：'flat'（腳底貼地，預設，會帶輕微外八 footYaw 預設 10°）|'up'|'down'|'back'|null|數字（世界座標下的腳尖下壓角度）
 //          |'point'（腳尖伸直）|'relax'（放鬆）|'flex'（勾腳）|{local:度數}（相對小腿），或 {L,R}
 // ── 姿勢品質說明 ──
-// 「叉腰」「金雞獨立」「跑步」「走路」「側臥」「I 字朝天蹬」「坐椅子」是用 XR Animator（SystemAnimatorOnline）附的 MMD 動作檔
-// （model_pose01／03、run_H16、walk_A34、Mixamo Female Laying Pose01、i-shaped_balance_TDA、Mixamo Female Sitting Pose01）
+// 「叉腰」「金雞獨立」「跑步」「走路」「側臥」「坐椅子」是用 XR Animator（SystemAnimatorOnline）附的 MMD 動作檔
+// （model_pose01／03、run_H16、walk_A34、Mixamo Female Laying Pose01、Mixamo Female Sitting Pose01）
 // 實際套到本模型上量測出方向、角度、手指彎曲後寫成的定義；站姿類的手臂左右不同、腳一前一後（骨盆水平，不歪向一邊）。
-// 這些數值源自第三方動作檔（i-shaped_balance 為 CC0，其餘授權未明或僅限非商用），公開散佈前請自行確認。
+// 這些數值源自第三方動作檔（授權未明或僅限非商用），公開散佈前請自行確認。
 const ARM_DOWN=[[0.22,0.05,-0.97],[0.15,0.35,-0.92]];
 // 自然站姿的手臂：兩側略不同（上臂微開、前臂微向前，手肘有彎），不是兩條一樣的直線
 const ARM_HANG=[{L:[[0.20,0.15,-0.97],[0.15,0.38,-0.91]],R:[[0.26,-0.05,-0.96],[0.20,0.22,-0.96]]},{L:[[0.26,-0.05,-0.96],[0.20,0.22,-0.96]],R:[[0.20,0.15,-0.97],[0.15,0.38,-0.91]]}];
@@ -218,7 +218,7 @@ const POSE_GROUPS=[
  ]},
  {group:'腿部動作',poses:[
   {name:'左右劈腿（一字馬）',arms:ARM_HANG[1],legs:{sym:[[1,0,-0.03],[1,0,-0.03]]},straightLegs:true,feet:'up',palm:'down',torso:{bend:3}},
-  {name:"I 字朝天蹬（站立劈腿）",natural:false,straightArms:true,straightLegs:true,arms:{L:[[0.44,-0.33,0.83],[0.43,0.38,0.81]],R:[[-0.45,-0.09,0.89],[-0.74,-0.61,0.28]]},legs:{L:[[-0.44,0.6,0.67],[-0.54,-0.21,0.81]],R:[[0.27,0.06,-0.96],[0.27,0.03,-0.96]]},hand:{L:{dir:[-0.12,0.43,0.9],palm:[-0.43,-0.85,0.32]},R:{dir:[-0.68,-0.71,0.18],palm:[-0.7,0.71,-0.06]}},fingers:{L:[[-4,-6,0],[-8,0,0],[-8,5,9],[-8,3,14]],R:[[8,15,0],[9,19,0],[5,15,13],[-6,24,16]]},feet:{L:12,R:40},footYaw:{L:-35,R:5},hips:{bend:0,twist:0,lean:-90},torso:{bend:-8.5,twist:-1,lean:76.7},head:{bend:18,twist:8.6,lean:36.2},hipsY:1.61,shift:[0.24,-0.07]},
+  {name:'I 字朝天蹬（站立劈腿）',arms:{L:[[0.2,0.5,0.8],[0,0.4,0.9]],R:[[0.9,0,0.2],[0.9,0,0.2]]},legs:{L:[[0,0.3,0.95],[0,0.3,0.95]],R:STAND},torso:{bend:-8},head:{bend:-10},knee:{L:0,R:8},feet:{L:'point',R:'flat'},fingers:{L:'open',R:'open'},palm:{L:'in',R:'down'}},
   {name:'前後劈腿',arms:{L:[[0.9,-0.1,0.25],[0.8,0.45,0.2]],R:[[0.85,-0.2,0.3],[0.95,0.2,0.05]]},legs:{L:[[0,1,-0.03],[0,1,-0.03]],R:[[0,-1,-0.03],[0,-1,-0.03]]},straightLegs:true,feet:{L:'up',R:'down'},palm:'down',fingers:'open'},
   {name:'弓步（左腳在前）',arms:{sym:[[0.1,0.4,-1],[-0.4,0.8,-0.3]]},legs:{L:[[0.05,0.85,-0.5],[0,0.1,-1]],R:[[0.05,-0.5,-0.85],[0,-0.9,-0.4]]},feet:{L:'flat',R:55},palm:'in',torso:{bend:6}},
   {name:'抬腿踢（左腳）',arms:{L:[[0.9,-0.1,0.25],[0.8,0.45,0.2]],R:[[0.85,-0.2,0.3],[0.95,0.2,0.05]]},legs:{L:[[0.1,1,0],[0.1,1,0]],R:STAND},knee:{L:0,R:8},feet:{L:'point',R:'flat'},palm:'down',fingers:'open',torso:{bend:-6}},
