@@ -41,7 +41,7 @@ details.sec[open]>summary::before{transform:rotate(90deg)}
 details.sec>summary:hover{color:var(--fg)}
 </style>
 <div id="side">
-  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.3.0</span></h1>
+  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.4.0</span></h1>
   <div class="sub">在瀏覽器裡檢視 VRM 模型、播放 VRMA 動作、擺測試姿勢、調表情。檔案只在你的瀏覽器內讀取，不會上傳。</div>
 
   <h2>VRM 模型</h2>
@@ -641,7 +641,7 @@ const manual=new Map();let autoBlink=false,blinkT=0,nextBlink=2;
 const EXPR_LABEL={neutral:'中立',happy:'開心',angry:'生氣',sad:'難過',relaxed:'放鬆',surprised:'驚訝',aa:'口型 あ (aa)',ih:'口型 い (ih)',ou:'口型 う (ou)',ee:'口型 え (ee)',oh:'口型 お (oh)',blink:'眨眼（雙眼）',blinkLeft:'左眼眨眼',blinkRight:'右眼眨眼',lookUp:'視線向上',lookDown:'視線向下',lookLeft:'視線向左',lookRight:'視線向右'};
 const EXPR_GROUPS=[['情緒',['neutral','happy','angry','sad','relaxed','surprised']],['口型',['aa','ih','ou','ee','oh']],['眨眼',['blink','blinkLeft','blinkRight']],['視線（lookAt 表情）',['lookUp','lookDown','lookLeft','lookRight']]];
 function buildExpressions(){
-  const box=$('exprs');box.innerHTML='';manual.clear();const em=vrm&&vrm.expressionManager;
+  const box=$('exprs');box.innerHTML='';manual.clear();emoAnim=null;for(const k in EXSL)delete EXSL[k];const em=vrm&&vrm.expressionManager;
   if(!em){box.textContent='（此模型沒有表情資料）';return;}
   const have=new Set(em.expressions.map(e=>e.expressionName));const used=new Set();
   const section=(title,names)=>{
@@ -653,18 +653,60 @@ function buildExpressions(){
       const val=document.createElement('span');val.className='sub';val.style.textAlign='right';val.textContent='0.00';
       const r=document.createElement('input');r.type='range';r.min=0;r.max=1;r.step=0.01;r.value=0;r.dataset.name=n;r.style.gridColumn='1 / span 2';
       r.oninput=()=>{const v=+r.value;manual.set(n,v);val.textContent=v.toFixed(2);em.setValue(n,v);lab.style.color='var(--acc)';};
+      EXSL[n]={r,val,lab};
       row.appendChild(lab);row.appendChild(val);box.appendChild(row);box.appendChild(r);}
   };
   for(const [t,ns] of EXPR_GROUPS)section(t,ns);
   section('自訂表情',[...have].filter(n=>!used.has(n)).sort());
 }
+const EXSL={};let emoAnim=null,emoCyc=0;
+function setExprUI(n,v,on){const s=EXSL[n];if(!s)return;s.r.value=v;s.val.textContent=v.toFixed(2);s.lab.style.color=on?'var(--acc)':'';}
+// 情緒組合：名稱以 * 結尾＝左右成對（Left/Right）；權重為 ARKit 52 的值
+const EMO={
+ '開心':{'mouthSmile*':.8,'cheekSquint*':.5,'eyeSquint*':.3,'browOuterUp*':.2,jawOpen:.1},
+ '大笑':{'mouthSmile*':1,jawOpen:.5,'cheekSquint*':.8,'eyeSquint*':.6,'mouthUpperUp*':.3,browInnerUp:.2},
+ '生氣':{'browDown*':1,'eyeSquint*':.4,'noseSneer*':.6,'mouthFrown*':.5,'mouthPress*':.4},
+ '驚訝':{'eyeWide*':1,browInnerUp:.8,'browOuterUp*':.8,jawOpen:.6,mouthFunnel:.2},
+ '難過':{browInnerUp:.9,'browDown*':.2,'mouthFrown*':.7,mouthShrugLower:.3,'eyeLookDown*':.3,'eyeBlink*':.2},
+ '害羞':{'eyeLookDown*':.5,'mouthSmile*':.4,'cheekSquint*':.4,browInnerUp:.4,'mouthPress*':.2,'eyeBlink*':.2},
+ '撒嬌':{mouthPucker:.6,cheekPuff:.3,browInnerUp:.6,'eyeWide*':.3,'mouthSmile*':.2},
+ '吐舌俏皮':{tongueOut:.8,jawOpen:.2,'mouthSmile*':.7,eyeBlinkLeft:1,cheekSquintLeft:.5},
+ '眨單眼':{eyeBlinkLeft:1,eyeSquintLeft:.4,cheekSquintLeft:.5,'mouthSmile*':.6},
+ '嫌棄':{'noseSneer*':.7,mouthShrugUpper:.4,'mouthFrown*':.4,'eyeSquint*':.5,'browDown*':.6,'eyeLookDown*':.4},
+ '打哈欠':{jawOpen:.9,'eyeBlink*':.8,'mouthStretch*':.2,browInnerUp:.3,'mouthUpperUp*':.2},
+ '鼓頰生氣':{cheekPuff:1,'browDown*':.6,'eyeSquint*':.3,mouthPucker:.3},
+ '嘟嘴親親':{mouthPucker:1,mouthFunnel:.2,'eyeBlink*':.3},
+ '驚恐':{'eyeWide*':1,browInnerUp:1,'mouthStretch*':.6,jawOpen:.4,'mouthFrown*':.3}
+};
+const EMO_FB={'開心':{happy:1},'大笑':{happy:1,aa:.5},'生氣':{angry:1},'驚訝':{surprised:1},'難過':{sad:1},'害羞':{relaxed:.6,happy:.3},'打哈欠':{aa:.9,blink:.8},'眨單眼':{blinkLeft:1,happy:.4},'嘟嘴親親':{ou:1,blink:.3},'驚恐':{surprised:1}};
+(()=>{const s=$('emo');for(const k in EMO){const o=document.createElement('option');o.textContent=k;s.appendChild(o);}})();
+function applyEmotion(name){
+  const em=vrm&&vrm.expressionManager;if(!em||!EMO[name])return;
+  const have=new Set(em.expressions.map(e=>e.expressionName));const ps=have.has('jawOpen')&&have.has('mouthSmileLeft');
+  const to=new Map();let want=0;
+  if(ps){for(const k in EMO[name]){const v=EMO[name][k];const ns=k.endsWith('*')?[k.slice(0,-1)+'Left',k.slice(0,-1)+'Right']:[k];for(const n of ns){want++;if(have.has(n))to.set(n,v);}}}
+  else{const fb=EMO_FB[name]||{};for(const n in fb){want++;if(have.has(n))to.set(n,fb[n]);}}
+  const names=new Set([...manual.keys(),...to.keys()]);const from=new Map();
+  for(const n of names)from.set(n,manual.has(n)?manual.get(n):(em.getValue?em.getValue(n)||0:0));
+  emoAnim={t:0,from,to,names};
+  $('emoInfo').textContent=name+'：'+(ps?'Perfect Sync 權重 ':'此模型無 ARKit 表情，改用標準表情近似 ')+to.size+'/'+want+' 項已套用'+(to.size?'':'（此模型沒有對應表情）')+'。';
+}
+function emoTick(dt){
+  if($('emoLoop').checked&&vrm){emoCyc+=dt;if(emoCyc>=2.5){emoCyc=0;const s=$('emo');s.selectedIndex=(s.selectedIndex+1)%s.options.length;applyEmotion(s.value);}}else emoCyc=0;
+  if(!emoAnim)return;const em=vrm&&vrm.expressionManager;if(!em){emoAnim=null;return;}
+  const a=emoAnim;a.t=Math.min(1,a.t+dt/0.25);const e=a.t*a.t*(3-2*a.t);
+  for(const n of a.names){const t=a.to.get(n)||0,v=a.from.get(n)+(t-a.from.get(n))*e;manual.set(n,v);em.setValue(n,v);setExprUI(n,v,true);}
+  if(a.t>=1){for(const n of a.names)if(!a.to.has(n)){manual.delete(n);em.setValue(n,0);setExprUI(n,0,false);}emoAnim=null;}
+}
+$('applyEmo').onclick=()=>applyEmotion($('emo').value);
 function resetExpressions(){
-  manual.clear();const em=vrm&&vrm.expressionManager;if(em)for(const e of em.expressions)em.setValue(e.expressionName,0);
+  emoAnim=null;manual.clear();const em=vrm&&vrm.expressionManager;if(em)for(const e of em.expressions)em.setValue(e.expressionName,0);
   document.querySelectorAll('#exprs input[type=range]').forEach(r=>{r.value=0;});document.querySelectorAll('#exprs span.sub').forEach(s=>s.textContent='0.00');document.querySelectorAll('#exprs label').forEach(l=>l.style.color='');
 }
 $('exprReset').onclick=resetExpressions;
 $('autoBlink').onchange=()=>{autoBlink=$('autoBlink').checked;};
 function exprTick(dt){
+  emoTick(dt);
   const em=vrm&&vrm.expressionManager;if(!em)return;
   if(autoBlink&&!manual.has('blink')&&em.getExpression&&em.getExpression('blink')){
     blinkT+=dt;let v=0;if(blinkT>nextBlink){const p=(blinkT-nextBlink)/0.18;if(p>=1){blinkT=0;nextBlink=2+Math.random()*3;}else v=1-Math.abs(p*2-1);}
@@ -890,6 +932,6 @@ if($('pickOn')){(function(){
   $('seamRun').onclick=()=>{seamScan().catch(e=>{$('seamOut').textContent='錯誤：'+e.message;});};
   $('meshRefresh').onclick=listMeshes;
 })();}
-window.__vmdAt=(t)=>{if(!vmdPlay)return 0;vmdPlay.t=t;stepVmd(0);vrm.update(0.001);return vmdPlay.dur;};window.__VERSION=($('ver')||{}).textContent;window.__ALL_POSES=ALL_POSES;window.__startPose=startPose;window.__loadVRMA=(...x)=>loadVRMA(...x);window.__FILES=()=>FILES;window.__step=(dt)=>{if(!vrm)return;if(mixer&&action)mixer.update(dt);vrm.update(dt);};window.__render=()=>{ctl.update();renderer.render(scene,cam);};window.__finishPose=()=>{if(poseK&&poseM)applyPoseK(vrm,poseK.comp,poseM,1);vrm.update(0.001);};
+window.__vmdAt=(t)=>{if(!vmdPlay)return 0;vmdPlay.t=t;stepVmd(0);vrm.update(0.001);return vmdPlay.dur;};window.__VERSION=($('ver')||{}).textContent;window.__ALL_POSES=ALL_POSES;window.__startPose=startPose;window.__loadVRMA=(...x)=>loadVRMA(...x);window.__FILES=()=>FILES;window.__step=(dt)=>{if(!vrm)return;if(mixer&&action)mixer.update(dt);exprTick(dt);vrm.update(dt);};window.__render=()=>{ctl.update();renderer.render(scene,cam);};window.__finishPose=()=>{if(poseK&&poseM)applyPoseK(vrm,poseK.comp,poseM,1);vrm.update(0.001);};
 tick();
 </script>
