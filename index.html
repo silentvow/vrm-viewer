@@ -41,7 +41,7 @@ details.sec[open]>summary::before{transform:rotate(90deg)}
 details.sec>summary:hover{color:var(--fg)}
 </style>
 <div id="side">
-  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.4.0</span></h1>
+  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.4.1</span></h1>
   <div class="sub">在瀏覽器裡檢視 VRM 模型、播放 VRMA 動作、擺測試姿勢、調表情。檔案只在你的瀏覽器內讀取，不會上傳。</div>
 
   <h2>VRM 模型</h2>
@@ -64,6 +64,11 @@ details.sec>summary:hover{color:var(--fg)}
   <div class="row"><select id="pose" class="grow" aria-label="測試姿勢"></select><button id="applyPose">套用</button></div>
   <div class="row" style="align-items:center;gap:6px" title="頭、頸、上身分攤轉向鏡頭（胸0.1／上胸0.15／頸0.3／頭0.45，上限70°），眼睛也跟著看；0＝關閉"><label class="sub" style="white-space:nowrap">看向鏡頭 <span id="gzV">0.0</span></label><input id="gz" class="grow" type="range" min="0" max="1" step="0.05" value="0"></div>
   <div class="sub">選了就套用；0.5 秒內過渡，彈簧骨照常運作。臀部高度會自動讓腳或膝蓋貼地。</div>
+
+  <h2>情緒組合</h2>
+  <div class="row"><select id="emo" class="grow"></select><button id="applyEmo">套用</button></div>
+  <div class="row"><label class="chk"><input type="checkbox" id="emoLoop">自動循環（每 2.5 秒換下一個）</label></div>
+  <div class="sub" id="emoInfo">一次套用一組表情權重（0.25 秒平滑過渡，其餘表情歸零）；下方滑桿會同步顯示，可再微調。需要 Perfect Sync（ARKit 52）模型，否則只用標準表情近似。</div>
 
   <h2>表情</h2>
   <div class="row"><button id="exprReset">全部歸零</button><label class="chk"><input type="checkbox" id="autoBlink">自動眨眼</label></div>
@@ -679,7 +684,7 @@ const EMO={
  '驚恐':{'eyeWide*':1,browInnerUp:1,'mouthStretch*':.6,jawOpen:.4,'mouthFrown*':.3}
 };
 const EMO_FB={'開心':{happy:1},'大笑':{happy:1,aa:.5},'生氣':{angry:1},'驚訝':{surprised:1},'難過':{sad:1},'害羞':{relaxed:.6,happy:.3},'打哈欠':{aa:.9,blink:.8},'眨單眼':{blinkLeft:1,happy:.4},'嘟嘴親親':{ou:1,blink:.3},'驚恐':{surprised:1}};
-(()=>{const s=$('emo');for(const k in EMO){const o=document.createElement('option');o.textContent=k;s.appendChild(o);}})();
+(()=>{const s=$('emo');if(!s)return;for(const k in EMO){const o=document.createElement('option');o.textContent=k;s.appendChild(o);}})();
 function applyEmotion(name){
   const em=vrm&&vrm.expressionManager;if(!em||!EMO[name])return;
   const have=new Set(em.expressions.map(e=>e.expressionName));const ps=have.has('jawOpen')&&have.has('mouthSmileLeft');
@@ -689,16 +694,16 @@ function applyEmotion(name){
   const names=new Set([...manual.keys(),...to.keys()]);const from=new Map();
   for(const n of names)from.set(n,manual.has(n)?manual.get(n):(em.getValue?em.getValue(n)||0:0));
   emoAnim={t:0,from,to,names};
-  $('emoInfo').textContent=name+'：'+(ps?'Perfect Sync 權重 ':'此模型無 ARKit 表情，改用標準表情近似 ')+to.size+'/'+want+' 項已套用'+(to.size?'':'（此模型沒有對應表情）')+'。';
+  if($('emoInfo'))$('emoInfo').textContent=name+'：'+(ps?'Perfect Sync 權重 ':'此模型無 ARKit 表情，改用標準表情近似 ')+to.size+'/'+want+' 項已套用'+(to.size?'':'（此模型沒有對應表情）')+'。';
 }
 function emoTick(dt){
-  if($('emoLoop').checked&&vrm){emoCyc+=dt;if(emoCyc>=2.5){emoCyc=0;const s=$('emo');s.selectedIndex=(s.selectedIndex+1)%s.options.length;applyEmotion(s.value);}}else emoCyc=0;
+  if($('emoLoop')&&$('emoLoop').checked&&vrm){emoCyc+=dt;if(emoCyc>=2.5){emoCyc=0;const s=$('emo');s.selectedIndex=(s.selectedIndex+1)%s.options.length;applyEmotion(s.value);}}else emoCyc=0;
   if(!emoAnim)return;const em=vrm&&vrm.expressionManager;if(!em){emoAnim=null;return;}
   const a=emoAnim;a.t=Math.min(1,a.t+dt/0.25);const e=a.t*a.t*(3-2*a.t);
   for(const n of a.names){const t=a.to.get(n)||0,v=a.from.get(n)+(t-a.from.get(n))*e;manual.set(n,v);em.setValue(n,v);setExprUI(n,v,true);}
   if(a.t>=1){for(const n of a.names)if(!a.to.has(n)){manual.delete(n);em.setValue(n,0);setExprUI(n,0,false);}emoAnim=null;}
 }
-$('applyEmo').onclick=()=>applyEmotion($('emo').value);
+if($('applyEmo'))$('applyEmo').onclick=()=>applyEmotion($('emo').value);
 function resetExpressions(){
   emoAnim=null;manual.clear();const em=vrm&&vrm.expressionManager;if(em)for(const e of em.expressions)em.setValue(e.expressionName,0);
   document.querySelectorAll('#exprs input[type=range]').forEach(r=>{r.value=0;});document.querySelectorAll('#exprs span.sub').forEach(s=>s.textContent='0.00');document.querySelectorAll('#exprs label').forEach(l=>l.style.color='');
