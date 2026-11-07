@@ -41,24 +41,19 @@ details.sec[open]>summary::before{transform:rotate(90deg)}
 details.sec>summary:hover{color:var(--fg)}
 </style>
 <div id="side">
-  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.1.0</span></h1>
+  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.2.0</span></h1>
   <div class="sub">在瀏覽器裡檢視 VRM 模型、播放 VRMA 動作、擺測試姿勢、調表情。檔案只在你的瀏覽器內讀取，不會上傳。</div>
 
   <h2>VRM 模型</h2>
   <div class="row"><label class="pill main">選擇 VRM 檔案…<input id="fv" type="file" accept=".vrm" hidden></label></div>
   <div class="sub">也可以把 .vrm 拖到右邊畫面。支援 VRM 1.0 與 0.x。</div>
 
-  <h2>VRMA 動作</h2>
-  <div class="sub">內建 12 個小型動作（MIT 授權），載入 VRM 後點選即播放：</div>
-  <select id="la" size="7" aria-label="內建 VRMA 動作"></select>
-  <div class="row"><label class="pill">選擇自己的 VRMA…<input id="fa" type="file" accept=".vrma" hidden></label>
+  <h2>動作（VRMA／VMD）</h2>
+  <div class="sub">內建 12 個小型 VRMA 動作（MIT 授權），載入 VRM 後點選即播放；也可載入自己的 VRMA 或 VMD：</div>
+  <select id="la" size="7" aria-label="內建動作"></select>
+  <div class="row"><label class="pill">選擇自己的動作檔…<input id="fa" type="file" accept=".vrma,.vmd" hidden></label>
     <button id="noanim">停止動作</button></div>
-
-  <h2>VMD 動作（MikuMikuDance）</h2>
-  <input type="text" id="qm" style="width:100%" placeholder="搜尋 VMD…">
-  <select id="lmd" size="7" style="margin-top:6px"></select>
-  <div class="row"><label class="pill" style="cursor:pointer">選擇本機 VMD…<input id="fm" type="file" accept=".vmd" hidden></label></div>
-  <div class="sub" style="margin-top:4px">假設 T-pose 骨架與標準 MMD 骨名；腿用 IK（有「足ＩＫ」時），位移依腿長換算。不含表情、相機。</div>
+  <div class="sub" style="margin-top:4px">VMD（MikuMikuDance）：假設 T-pose 骨架與標準 MMD 骨名；腿用 IK（有「足ＩＫ」時），位移依腿長換算；不含表情、相機。</div>
 
   <h2>播放</h2>
   <div class="row"><button id="play" class="grow">暫停</button><label class="chk"><input type="checkbox" id="loop" checked>循環</label></div>
@@ -103,9 +98,9 @@ details.sec>summary:hover{color:var(--fg)}
   <div id="info">（尚未載入）</div>
 </div>
 <script>
-// 左側面板：每個 h2 區段做成可摺疊（accordion），預設只展開 VRM／VRMA／VMD／測試姿勢／資訊；狀態記在 localStorage
+// 左側面板：每個 h2 區段做成可摺疊（accordion），預設只展開 VRM／動作／測試姿勢／資訊；狀態記在 localStorage
 (function(){
-  var OPEN=['VRM 模型','VRMA 動作','VMD 動作','測試姿勢','資訊'],KEY='vrmviewer.sections',saved={};
+  var OPEN=['VRM 模型','動作','測試姿勢','資訊'],KEY='vrmviewer.sections',saved={};
   try{saved=JSON.parse(localStorage.getItem(KEY)||'{}')}catch(e){}
   var side=document.getElementById('side');
   Array.prototype.slice.call(side.querySelectorAll('h2')).forEach(function(h){
@@ -616,7 +611,6 @@ async function loadFile(file){
 }
 $('fv').onchange=e=>{if(e.target.files[0])loadFile(e.target.files[0]);e.target.value='';};
 $('fa').onchange=e=>{if(e.target.files[0])loadFile(e.target.files[0]);e.target.value='';};
-$('fm').onchange=e=>{if(e.target.files[0])loadFile(e.target.files[0]);e.target.value='';};
 const stage=$('stage');
 stage.addEventListener('dragover',e=>{e.preventDefault();$('drop').style.display='flex';});
 stage.addEventListener('dragleave',()=>{$('drop').style.display='none';});
