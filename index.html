@@ -41,7 +41,7 @@ details.sec[open]>summary::before{transform:rotate(90deg)}
 details.sec>summary:hover{color:var(--fg)}
 </style>
 <div id="side">
-  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.0.0</span></h1>
+  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.1.0</span></h1>
   <div class="sub">在瀏覽器裡檢視 VRM 模型、播放 VRMA 動作、擺測試姿勢、調表情。檔案只在你的瀏覽器內讀取，不會上傳。</div>
 
   <h2>VRM 模型</h2>
@@ -53,6 +53,12 @@ details.sec>summary:hover{color:var(--fg)}
   <select id="la" size="7" aria-label="內建 VRMA 動作"></select>
   <div class="row"><label class="pill">選擇自己的 VRMA…<input id="fa" type="file" accept=".vrma" hidden></label>
     <button id="noanim">停止動作</button></div>
+
+  <h2>VMD 動作（MikuMikuDance）</h2>
+  <input type="text" id="qm" style="width:100%" placeholder="搜尋 VMD…">
+  <select id="lmd" size="7" style="margin-top:6px"></select>
+  <div class="row"><label class="pill" style="cursor:pointer">選擇本機 VMD…<input id="fm" type="file" accept=".vmd" hidden></label></div>
+  <div class="sub" style="margin-top:4px">假設 T-pose 骨架與標準 MMD 骨名；腿用 IK（有「足ＩＫ」時），位移依腿長換算。不含表情、相機。</div>
 
   <h2>播放</h2>
   <div class="row"><button id="play" class="grow">暫停</button><label class="chk"><input type="checkbox" id="loop" checked>循環</label></div>
@@ -97,9 +103,9 @@ details.sec>summary:hover{color:var(--fg)}
   <div id="info">（尚未載入）</div>
 </div>
 <script>
-// 左側面板：每個 h2 區段做成可摺疊（accordion），預設只展開 VRM／VRMA／測試姿勢／資訊；狀態記在 localStorage
+// 左側面板：每個 h2 區段做成可摺疊（accordion），預設只展開 VRM／VRMA／VMD／測試姿勢／資訊；狀態記在 localStorage
 (function(){
-  var OPEN=['VRM 模型','VRMA 動作','測試姿勢','資訊'],KEY='vrmviewer.sections',saved={};
+  var OPEN=['VRM 模型','VRMA 動作','VMD 動作','測試姿勢','資訊'],KEY='vrmviewer.sections',saved={};
   try{saved=JSON.parse(localStorage.getItem(KEY)||'{}')}catch(e){}
   var side=document.getElementById('side');
   Array.prototype.slice.call(side.querySelectorAll('h2')).forEach(function(h){
@@ -410,6 +416,108 @@ function gazeAt(vrm,m,target,k){
     n.quaternion.copy(inv(pw).multiply(Rb).multiply(pw).multiply(n.quaternion));n.updateMatrixWorld(true);st[b].out=n.quaternion.clone();}
 }
 
+// ===== lib/vmd.js（內嵌）=====
+// VMD（MikuMikuDance 動作檔）載入與播放：解析 → 依時間內插（含 VMD 的貝茲曲線）→ 套到 VRM 的標準化骨架
+// 假設：VMD 的模型是 T-pose 骨架（標準 MMD 骨名）；骨頭旋轉直接換到 VRM（左手系→右手系：四元數 (-x,-y,z,w)，z 位移反向）。
+// 腿：有「足ＩＫ」關鍵影格就用兩段式 IK（膝蓋朝前彎），否則用 FK 的 足／ひざ／足首。
+// 位移（センター／グルーブ／足ＩＫ）依腿長換算：VMD 單位 × (本模型腿長 / 10.56958)，10.56958 是 XR Animator 內 TDA 模型的腿長。
+// 不處理：表情（モーフ）、相機、IK 以外的物理、付与親（捩りボーン只合併進上臂／手）。
+const VMD=(()=>{
+const Q=THREE.Quaternion,V3=THREE.Vector3,inv=q=>q.clone().invert();
+const SJIS=new TextDecoder('shift_jis');
+const nm=(b,o,n)=>{let e=o;while(e<o+n&&b[e])e++;return SJIS.decode(b.subarray(o,e));};
+function parse(buf){
+  const u8=new Uint8Array(buf),dv=new DataView(buf);
+  const head=nm(u8,0,30);if(!head.startsWith('Vocaloid Motion Data'))throw new Error('不是 VMD 檔案');
+  let o=30+(head.includes('0002')?20:10);
+  const bones=new Map();let max=0;
+  const nb=dv.getUint32(o,true);o+=4;
+  for(let i=0;i<nb;i++){
+    const name=nm(u8,o,15),f=dv.getUint32(o+15,true);
+    const k={f,p:[dv.getFloat32(o+19,true),dv.getFloat32(o+23,true),dv.getFloat32(o+27,true)],q:[dv.getFloat32(o+31,true),dv.getFloat32(o+35,true),dv.getFloat32(o+39,true),dv.getFloat32(o+43,true)],ip:u8.subarray(o+47,o+111)};
+    let a=bones.get(name);if(!a)bones.set(name,a=[]);a.push(k);if(f>max)max=f;o+=111;
+  }
+  for(const a of bones.values())a.sort((x,y)=>x.f-y.f);
+  const ik=[];
+  try{
+    const nmor=dv.getUint32(o,true);o+=4+nmor*23;
+    const ncam=dv.getUint32(o,true);o+=4+ncam*(head.includes('0002')?61:57);
+    const nlit=dv.getUint32(o,true);o+=4+nlit*28;
+    const nsh=dv.getUint32(o,true);o+=4+nsh*9;
+    const nik=dv.getUint32(o,true);o+=4;
+    for(let i=0;i<nik;i++){const f=dv.getUint32(o,true),n=dv.getUint32(o+5,true);o+=9;const fl={};for(let j=0;j<n;j++){fl[nm(u8,o,20)]=u8[o+20];o+=21;}ik.push({f,fl});}
+    ik.sort((a,b)=>a.f-b.f);
+  }catch(e){/* 沒有 IK 開關資料就當全部開啟 */}
+  return {bones,ik,max,model:head.includes('0002')?nm(u8,30,20):''};
+}
+// 貝茲曲線 (x1,y1,x2,y2 為 0..127)：給 t 求 y
+function bez(x1,y1,x2,y2,t){
+  if(x1===y1&&x2===y2)return t;
+  const X1=x1/127,Y1=y1/127,X2=x2/127,Y2=y2/127;let lo=0,hi=1,s=t;
+  for(let i=0;i<14;i++){s=(lo+hi)/2;const x=3*(1-s)*(1-s)*s*X1+3*(1-s)*s*s*X2+s*s*s;if(x<t)lo=s;else hi=s;}
+  return 3*(1-s)*(1-s)*s*Y1+3*(1-s)*s*s*Y2+s*s*s;
+}
+const qa=new Q(),qb=new Q();
+function sampleBone(a,f){
+  let lo=0,hi=a.length-1;
+  if(f<=a[0].f)return [...a[0].p,...a[0].q];
+  if(f>=a[hi].f)return [...a[hi].p,...a[hi].q];
+  while(hi-lo>1){const m=(lo+hi)>>1;if(a[m].f<=f)lo=m;else hi=m;}
+  const k0=a[lo],k1=a[hi],t=(f-k0.f)/(k1.f-k0.f),ip=k1.ip;
+  const cu=(o)=>bez(ip[o],ip[o+4],ip[o+8],ip[o+12],t);
+  const tx=cu(0),ty=cu(16),tz=cu(32),tr=cu(48);
+  qa.set(k0.q[0],k0.q[1],k0.q[2],k0.q[3]);qb.set(k1.q[0],k1.q[1],k1.q[2],k1.q[3]);qa.slerp(qb,tr);
+  return [k0.p[0]+(k1.p[0]-k0.p[0])*tx,k0.p[1]+(k1.p[1]-k0.p[1])*ty,k0.p[2]+(k1.p[2]-k0.p[2])*tz,qa.x,qa.y,qa.z,qa.w];
+}
+function sample(vmd,f){
+  const b={};for(const [n,a] of vmd.bones)b[n]=sampleBone(a,f);
+  let fl={};for(const e of vmd.ik){if(e.f<=f)fl=e.fl;else break;}
+  return {b,ik:fl};
+}
+// 對某個 VRM 先量一次（靜止姿勢的尺寸、腳踝位置），之後每幀 apply
+function prep(vrm){
+  const m=measure(vrm);vrm.humanoid.resetNormalizedPose();vrm.scene.updateMatrixWorld(true);
+  const N=n=>vrm.humanoid.getNormalizedBoneNode(n);
+  return {m,restFoot:{left:N('leftFoot').getWorldPosition(new V3()),right:N('rightFoot').getWorldPosition(new V3())},scale:(m.ul+m.ll)/10.56958};
+}
+const FING={'人指':'Index','中指':'Middle','薬指':'Ring','小指':'Little'},SEG=['Proximal','Intermediate','Distal'],NUM=['１','２','３'];
+function apply(vrm,P,fr){
+  const m=P.m,Sq=m.Sq,SqI=inv(Sq),N=n=>vrm.humanoid.getNormalizedBoneNode(n),B=fr.b,ik=fr.ik||{};
+  vrm.humanoid.resetNormalizedPose();
+  const cq=a=>a?new Q(-a[3],-a[4],a[5],a[6]):new Q();
+  const set=(n,q)=>{const o=N(n);if(o)o.quaternion.copy(SqI.clone().multiply(q).multiply(Sq));};
+  const G=n=>cq(B[n]),scale=P.scale;
+  const cp=B['センター']||[0,0,0],gp=B['グルーブ']||[0,0,0];
+  N('hips').position.copy(m.hipsLocal).add(new V3((cp[0]+gp[0])*scale,(cp[1]+gp[1])*scale,-(cp[2]+gp[2])*scale).applyQuaternion(SqI));
+  const Rl=G('下半身');
+  set('hips',G('センター').multiply(G('グルーブ')));set('spine',G('上半身'));set('chest',G('上半身2'));set('neck',G('首'));set('head',G('頭'));
+  for(const [s,jp] of [['left','左'],['right','右']]){
+    set(s+'Shoulder',G(jp+'肩'));set(s+'UpperArm',G(jp+'腕').multiply(G(jp+'腕捩')));set(s+'LowerArm',G(jp+'ひじ'));set(s+'Hand',G(jp+'手捩').multiply(G(jp+'手首')));
+    for(const [k,e] of Object.entries(FING))for(let i=0;i<3;i++)set(s+e+SEG[i],G(jp+k+NUM[i]));
+    if(N(s+'ThumbMetacarpal')){set(s+'ThumbMetacarpal',G(jp+'親指０'));set(s+'ThumbProximal',G(jp+'親指１'));set(s+'ThumbDistal',G(jp+'親指２'));}
+    else{set(s+'ThumbProximal',G(jp+'親指０').multiply(G(jp+'親指１')));set(s+'ThumbIntermediate',G(jp+'親指２'));}
+    set(s+'UpperLeg',Rl.clone().multiply(G(jp+'足')));set(s+'LowerLeg',G(jp+'ひざ'));set(s+'Foot',G(jp+'足首'));
+  }
+  vrm.scene.updateMatrixWorld(true);
+  for(const [s,jp] of [['left','左'],['right','右']]){
+    const key=jp+'足ＩＫ';if(!B[key]||ik[key]===0)continue;
+    const a=B[key],tgt=P.restFoot[s].clone().add(new V3(a[0]*scale,a[1]*scale,-a[2]*scale).applyQuaternion(SqI));
+    const up=N(s+'UpperLeg'),lo=N(s+'LowerLeg'),ft=N(s+'Foot'),h=up.getWorldPosition(new V3()),l1=m.ul,l2=m.ll;
+    const d=tgt.clone().sub(h);const dl=Math.min(Math.max(d.length(),Math.abs(l1-l2)+1e-4),l1+l2-1e-4);d.normalize();
+    const ca=(l1*l1+dl*dl-l2*l2)/(2*l1*dl),sa=Math.sqrt(Math.max(0,1-ca*ca));
+    const F=new V3(0,0,1).applyQuaternion(Sq);const pole=F.clone().sub(d.clone().multiplyScalar(F.dot(d)));if(pole.lengthSq()<1e-6)pole.set(0,0,1);pole.normalize();
+    const knee=h.clone().addScaledVector(d,l1*ca).addScaledVector(pole,l1*sa),ank=h.clone().addScaledVector(d,dl),rest=new V3(0,-1,0);
+    let Pq=up.parent.getWorldQuaternion(new Q());
+    let W=new Q().setFromUnitVectors(rest.clone().applyQuaternion(Pq),knee.clone().sub(h).normalize());up.quaternion.copy(inv(Pq).multiply(W).multiply(Pq));up.updateMatrixWorld(true);
+    Pq=lo.parent.getWorldQuaternion(new Q());
+    W=new Q().setFromUnitVectors(rest.clone().applyQuaternion(Pq),ank.clone().sub(knee).normalize());lo.quaternion.copy(inv(Pq).multiply(W).multiply(Pq));lo.updateMatrixWorld(true);
+    Pq=ft.parent.getWorldQuaternion(new Q());
+    ft.quaternion.copy(inv(Pq).multiply(Sq.clone().multiply(cq(a)).multiply(SqI)).multiply(Pq).multiply(G(jp+'足首')));ft.updateMatrixWorld(true);
+  }
+}
+return {parse,sample,prep,apply};
+})();
+
 // ===== 檢視器 =====
 // ---------- scene
 const cv=$('cv');const renderer=new THREE.WebGLRenderer({canvas:cv,antialias:true});
@@ -427,6 +535,7 @@ function resize(){const r=$('stage').getBoundingClientRect();renderer.setSize(r.
 addEventListener('resize',resize);resize();
 // ---------- loaders
 const loader=new GLTFLoader();loader.register(p=>new VRMLoaderPlugin(p));loader.register(p=>new VRMAnimationLoaderPlugin(p));
+let vmdPlay=null,lastVmd=null;
 let vrm=null,mixer=null,action=null,clip=null,playing=true,sprMgr=null,colHelpers=[],skelHelper=null,vrmName='',vrmaName='',poseK=null;window.__scene=scene;window.__THREE=THREE;Object.defineProperty(window,"__vrm",{get:()=>vrm});
 function loadGLTF(buf,label){
   return new Promise((res,rej)=>{say(`${label} 解析中…`);loader.parse(buf,'',res,rej);});
@@ -435,7 +544,7 @@ function clearModel(){
   if(!vrm)return;
   scene.remove(vrm.scene);VRMUtils.deepDispose(vrm.scene);colHelpers.forEach(h=>{scene.remove(h);h.dispose&&h.dispose();});colHelpers=[];
   if(skelHelper){scene.remove(skelHelper);skelHelper=null;}
-  vrm=null;mixer=null;action=null;clip=null;sprMgr=null;poseK=null;
+  vrm=null;mixer=null;action=null;clip=null;sprMgr=null;poseK=null;vmdPlay=null;
 }
 async function loadVRM(url,name){
   try{
@@ -465,25 +574,49 @@ async function loadVRMA(url,name){
   }catch(e){console.error(e);say('載入失敗：'+(e.message||e),true);}
 }
 async function applyVrma(a,name){
-  if(!vrm)return;
+  if(!vrm)return;vmdPlay=null;
   if(action){action.stop();mixer.uncacheAction(clip);}
   vrm.humanoid.resetNormalizedPose();if(sprMgr)sprMgr.reset();poseK=null;
   clip=createVRMAnimationClip(a,vrm);action=mixer.clipAction(clip);action.setLoop($('loop').checked?THREE.LoopRepeat:THREE.LoopOnce,Infinity);action.clampWhenFinished=true;action.play();
   playing=true;$('play').textContent='暫停';updateInfo();say(`播放 ${name}（${clip.duration.toFixed(2)} 秒）`);
 }
-$('noanim').onclick=()=>{if(action){action.stop();mixer.uncacheAction(clip);action=null;clip=null;}if(vrm){vrm.humanoid.resetNormalizedPose();if(sprMgr)sprMgr.reset();}lastVrma=null;vrmaName='';poseK=null;updateInfo();say('已停止動作');};
+$('noanim').onclick=()=>{vmdPlay=null;if(action){action.stop();mixer.uncacheAction(clip);action=null;clip=null;}if(vrm){vrm.humanoid.resetNormalizedPose();if(sprMgr)sprMgr.reset();}lastVrma=null;vrmaName='';poseK=null;updateInfo();say('已停止動作');};
+// ---------- VMD
+async function loadVMD(url,name){
+  try{
+    const buf=typeof url==='string'?await (await fetch(url)).arrayBuffer():url;const d=VMD.parse(buf);
+    if(!d.bones.size)throw new Error('這個 VMD 沒有骨架動作資料');
+    lastVmd={d,name};
+    if(!vrm){say(`已讀入 ${name}（請先載入 VRM）`);return;}
+    startVmd();
+  }catch(e){console.error(e);say('VMD 載入失敗：'+(e.message||e),true);}
+}
+function startVmd(){
+  if(!vrm||!lastVmd)return;
+  if(action){action.stop();mixer.uncacheAction(clip);action=null;clip=null;}lastVrma=null;vrmaName='';poseK=null;
+  vrm.humanoid.resetNormalizedPose();if(sprMgr)sprMgr.reset();
+  const d=lastVmd.d;vmdPlay={d,P:VMD.prep(vrm),t:0,dur:Math.max(d.max,1)/30,name:lastVmd.name};
+  playing=true;$('play').textContent='暫停';updateInfo();say(`播放 VMD：${lastVmd.name}（${vmdPlay.dur.toFixed(2)} 秒，${d.bones.size} 條骨頭）`);
+}
+function stepVmd(dt){
+  const v=vmdPlay;if(playing){v.t+=dt*(+$('speed').value);if(v.t>v.dur){if($('loop').checked)v.t=v.t%v.dur;else{v.t=v.dur;}}}
+  VMD.apply(vrm,v.P,VMD.sample(v.d,v.t*30));
+  $('tm').textContent=`${v.t.toFixed(2)} / ${v.dur.toFixed(2)} s`;if(playing)$('seek').value=Math.round(1000*v.t/v.dur);
+}
 // ---------- built-in VRMA and user files
 const b64buf=s=>{const bin=atob(s),u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return u.buffer;};
 {const sel=$('la');for(const [id,label,b64] of BUILTIN){const o=document.createElement('option');o.value=id;o.textContent=`${label}（${id}）`;sel.appendChild(o);}
  sel.onchange=()=>{const e=BUILTIN.find(x=>x[0]===sel.value);if(e)loadVRMA(b64buf(e[2]),e[0]);};}
 async function loadFile(file){
   const n=file.name.toLowerCase();
-  if(!n.endsWith('.vrm')&&!n.endsWith('.vrma')){say('只支援 .vrm / .vrma',true);return;}
+  if(!n.endsWith('.vrm')&&!n.endsWith('.vrma')&&!n.endsWith('.vmd')){say('只支援 .vrm / .vrma / .vmd',true);return;}
   let buf;try{buf=await file.arrayBuffer();}catch(e){say('讀檔失敗：'+(e.message||e),true);return;}
+  if(n.endsWith('.vmd')){loadVMD(buf,file.name);return;}
   if(n.endsWith('.vrma')){$('la').selectedIndex=-1;loadVRMA(buf,file.name);}else loadVRM(buf,file.name);
 }
 $('fv').onchange=e=>{if(e.target.files[0])loadFile(e.target.files[0]);e.target.value='';};
 $('fa').onchange=e=>{if(e.target.files[0])loadFile(e.target.files[0]);e.target.value='';};
+$('fm').onchange=e=>{if(e.target.files[0])loadFile(e.target.files[0]);e.target.value='';};
 const stage=$('stage');
 stage.addEventListener('dragover',e=>{e.preventDefault();$('drop').style.display='flex';});
 stage.addEventListener('dragleave',()=>{$('drop').style.display='none';});
@@ -491,7 +624,7 @@ stage.addEventListener('drop',e=>{e.preventDefault();$('drop').style.display='no
 // ---------- playback
 $('play').onclick=()=>{playing=!playing;$('play').textContent=playing?'暫停':'播放';};
 $('loop').onchange=()=>{if(action){action.setLoop($('loop').checked?THREE.LoopRepeat:THREE.LoopOnce,Infinity);if($('loop').checked&&!action.isRunning()){action.reset().play();}}};
-$('seek').oninput=()=>{if(!action||!clip)return;playing=false;$('play').textContent='播放';action.paused=false;action.time=clip.duration*($('seek').value/1000);mixer.update(0);};
+$('seek').oninput=()=>{if(vmdPlay){playing=false;$('play').textContent='播放';vmdPlay.t=vmdPlay.dur*$('seek').value/1000;return;}if(!action||!clip)return;playing=false;$('play').textContent='播放';action.paused=false;action.time=clip.duration*($('seek').value/1000);mixer.update(0);};
 // ---------- poses（定義在 poses.js；方向以世界座標設定，VRM 1.0／0.x 通用）
 let poseM=null;
 {const sel=$('pose');const o0=document.createElement('option');o0.textContent='（選擇姿勢）';sel.appendChild(o0);
@@ -499,7 +632,7 @@ let poseM=null;
  for(const g of POSE_GROUPS){const og=document.createElement('optgroup');og.label=g.group;for(const p of g.poses){const o=document.createElement('option');o.textContent=p.name;og.appendChild(o);}sel.appendChild(og);}}
 function startPose(name){
   if(!vrm){say('請先載入 VRM',true);return;}
-  if(name==='（選擇姿勢）')return;
+  if(name==='（選擇姿勢）')return;vmdPlay=null;
   if(action){action.stop();mixer.uncacheAction(clip);action=null;clip=null;}lastVrma=null;vrmaName='';
   vrm.humanoid.resetNormalizedPose();
   if(name==='T-pose（回初始）'){poseK=null;say('已回初始姿勢');updateInfo();return;}
@@ -639,7 +772,7 @@ function updateInfo(){
   const meshes=[];vrm.scene.traverse(o=>{if(o.isSkinnedMesh)meshes.push(o)});let tris=0;meshes.forEach(o=>{const g=o.geometry;tris+=(g.index?g.index.count:g.attributes.position.count)/3;});
   $('info').textContent=[`VRM：${vrmName}`,`規格：${m.metaVersion==='1'?'VRM 1.0':'VRM 0.x'}`,`名稱：${m.name||m.title||'-'}`,`作者：${(m.authors||[m.author]||[]).filter(Boolean).join(', ')||'-'}`,
    `蒙皮網格 ${meshes.length}、三角形 ${Math.round(tris).toLocaleString()}`,`彈簧骨關節 ${nj}、碰撞體 ${nc}`,
-   `動作：${action?vrmaName+`（${clip.duration.toFixed(2)} 秒）`:(poseK?'測試姿勢：'+poseK.name:'無')}`].join('\n');
+   `動作：${action?vrmaName+`（${clip.duration.toFixed(2)} 秒）`:(vmdPlay?'VMD：'+vmdPlay.name+`（${vmdPlay.dur.toFixed(2)} 秒）`:poseK?'測試姿勢：'+poseK.name:'無')}`].join('\n');
 }
 // ---------- loop
 const clock=new THREE.Clock();
@@ -649,7 +782,8 @@ function tick(){
     if(mixer&&action){
       if(playing)mixer.update(dt*(+$('speed').value));
       if(clip){const t=action.time%(clip.duration||1);$('tm').textContent=`${t.toFixed(2)} / ${clip.duration.toFixed(2)} s`;if(playing)$('seek').value=Math.round(1000*t/(clip.duration||1));}
-    }else{$('tm').textContent='無動作';}
+    }else if(!vmdPlay){$('tm').textContent='無動作';}
+    if(vmdPlay)stepVmd(dt);
     if(poseK&&poseM){applyPoseK(vrm,poseK.comp,poseM,Math.min(1,(performance.now()-poseK.t0)/500));}
     if(poseM)gazeAt(vrm,poseM,cam.getWorldPosition(new THREE.Vector3()),GZ.k);
     exprTick(dt);
@@ -742,6 +876,6 @@ if($('pickOn')){(function(){
   $('seamRun').onclick=()=>{seamScan().catch(e=>{$('seamOut').textContent='錯誤：'+e.message;});};
   $('meshRefresh').onclick=listMeshes;
 })();}
-window.__VERSION=($('ver')||{}).textContent;window.__ALL_POSES=ALL_POSES;window.__startPose=startPose;window.__loadVRMA=(...x)=>loadVRMA(...x);window.__FILES=()=>FILES;window.__step=(dt)=>{if(!vrm)return;if(mixer&&action)mixer.update(dt);vrm.update(dt);};window.__render=()=>{ctl.update();renderer.render(scene,cam);};window.__finishPose=()=>{if(poseK&&poseM)applyPoseK(vrm,poseK.comp,poseM,1);vrm.update(0.001);};
+window.__vmdAt=(t)=>{if(!vmdPlay)return 0;vmdPlay.t=t;stepVmd(0);vrm.update(0.001);return vmdPlay.dur;};window.__VERSION=($('ver')||{}).textContent;window.__ALL_POSES=ALL_POSES;window.__startPose=startPose;window.__loadVRMA=(...x)=>loadVRMA(...x);window.__FILES=()=>FILES;window.__step=(dt)=>{if(!vrm)return;if(mixer&&action)mixer.update(dt);vrm.update(dt);};window.__render=()=>{ctl.update();renderer.render(scene,cam);};window.__finishPose=()=>{if(poseK&&poseM)applyPoseK(vrm,poseK.comp,poseM,1);vrm.update(0.001);};
 tick();
 </script>
