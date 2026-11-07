@@ -41,7 +41,7 @@ details.sec[open]>summary::before{transform:rotate(90deg)}
 details.sec>summary:hover{color:var(--fg)}
 </style>
 <div id="side">
-  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.2.0</span></h1>
+  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.3.0</span></h1>
   <div class="sub">在瀏覽器裡檢視 VRM 模型、播放 VRMA 動作、擺測試姿勢、調表情。檔案只在你的瀏覽器內讀取，不會上傳。</div>
 
   <h2>VRM 模型</h2>
@@ -788,14 +788,21 @@ function tick(){
 
 // ---------- 點選檢查：點模型 -> 列出命中的網格／三角面／材質／UV；可隱藏三角面、單獨關網格或外框線
 if($('pickOn')){(function(){
-  const rc=new THREE.Raycaster(),saved=new Map();let sel=null,hl=null,down=null;
+  const rc=new THREE.Raycaster(),saved=new Map();let sel=null,down=null,hoverKey='',hoverBusy=false,hoverEv=null;
   const meshes=()=>{const a=[];if(vrm)vrm.scene.traverse(o=>{if(o.isMesh)a.push(o)});return a;};
   const matOf=(o,gi)=>Array.isArray(o.material)?o.material[gi]:o.material;
-  function clearHl(){if(hl){scene.remove(hl);hl.geometry.dispose();hl.material.dispose();hl=null;}}
-  function showTri(o,f){
-    clearHl();const I=o.geometry.index,v=[0,1,2].map(k=>I?I.getX(f*3+k):f*3+k),pts=v.map(i=>{const p=new THREE.Vector3();(o.getVertexPosition?o.getVertexPosition(i,p):p.fromBufferAttribute(o.geometry.attributes.position,i));return p.applyMatrix4(o.matrixWorld);});
-    hl=new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:0xff2060,depthTest:false}));hl.renderOrder=999;scene.add(hl);
+  // 兩種標示：滑鼠移到的三角面（青色）、已選中的三角面（紅色）；各為半透明填色＋外框，不受深度遮擋；離開點選模式或關掉就全部移除（只加了這兩個覆蓋物，模型本身的材質、顏色沒動）
+  const slots={hover:null,sel:null},STY={hover:{fill:0x00e5ff,line:0x00ffff,op:0.55,ord:998},sel:{fill:0xff2060,line:0xffffff,op:0.6,ord:1000}};
+  function clearSlot(n){const s=slots[n];if(s){scene.remove(s);s.userData.g.dispose();s.userData.m.dispose();s.userData.lm.dispose();slots[n]=null;}}
+  function clearHl(){clearSlot('hover');clearSlot('sel');hoverKey='';}
+  function triPts(o,f){const I=o.geometry.index,v=[0,1,2].map(k=>I?I.getX(f*3+k):f*3+k);return v.map(i=>{const p=new THREE.Vector3();(o.getVertexPosition?o.getVertexPosition(i,p):p.fromBufferAttribute(o.geometry.attributes.position,i));return p.applyMatrix4(o.matrixWorld);});}
+  function setSlot(n,o,f){
+    clearSlot(n);const st=STY[n],g=new THREE.BufferGeometry().setFromPoints(triPts(o,f));
+    const m=new THREE.MeshBasicMaterial({color:st.fill,transparent:true,opacity:st.op,depthTest:false,depthWrite:false,side:THREE.DoubleSide}),lm=new THREE.LineBasicMaterial({color:st.line,depthTest:false});
+    const a=new THREE.Mesh(g,m),b=new THREE.LineLoop(g,lm);a.renderOrder=st.ord;b.renderOrder=st.ord+1;a.frustumCulled=b.frustumCulled=false;
+    const grp=new THREE.Group();grp.add(a,b);grp.userData={g,m,lm};scene.add(grp);slots[n]=grp;
   }
+  const showTri=(o,f)=>setSlot('sel',o,f);
   function describe(h){
     const o=h.object,g=o.geometry,f=h.faceIndex,I=g.index,v=[0,1,2].map(k=>I?I.getX(f*3+k):f*3+k),P=g.attributes.position,N=g.attributes.normal,U=g.attributes.uv;
     const p=v.map(i=>new THREE.Vector3(P.getX(i),P.getY(i),P.getZ(i))),fn=p[1].clone().sub(p[0]).cross(p[2].clone().sub(p[0]));const area=fn.length()/2;fn.normalize();
@@ -811,11 +818,24 @@ if($('pickOn')){(function(){
     for(const h of raw){const m=matOf(h.object,h.face.materialIndex),k=h.object.uuid+'#'+h.faceIndex;if(seen.has(k)){const prev=hits.find(x=>x.k===k);if(prev&&m&&/Outline/.test(m.name))prev.outline=true;continue;}seen.add(k);hits.push({k,h,outline:!!(m&&/Outline/.test(m.name))});}
     const top=hits.slice(0,8);sel=top[0]?top[0].h:null;
     $('pickOut').textContent=top.length?top.map((x,i)=>`${i+1}. ${describe(x.h)}${x.outline?'  （含外框線）':''}`).join('\n'):'沒有點到任何東西';
-    if(sel)showTri(sel.object,sel.faceIndex);else clearHl();
+    clearSlot('hover');hoverKey='';if(sel)showTri(sel.object,sel.faceIndex);else clearSlot('sel');
   }
   cv.addEventListener('pointerdown',e=>{down=[e.clientX,e.clientY];});
   cv.addEventListener('pointerup',e=>{if($('pickOn').checked&&down&&Math.hypot(e.clientX-down[0],e.clientY-down[1])<4)doPick(e);});
-  $('pickOn').onchange=()=>{if(!$('pickOn').checked)clearHl();else listMeshes();};
+  // 滑鼠移動：最前面那個三角面標成青色（拖曳旋轉視角時不更新；已被選中的那一面維持紅色）。節流：上一次射線算完才算下一次
+  function doHover(){
+    hoverBusy=false;const e=hoverEv;hoverEv=null;if(!e||!$('pickOn').checked||!vrm)return;
+    const r=cv.getBoundingClientRect();rc.setFromCamera(new THREE.Vector2(((e.clientX-r.left)/r.width)*2-1,-((e.clientY-r.top)/r.height)*2+1),cam);
+    const h=rc.intersectObjects(meshes(),false)[0];
+    if(!h){if(hoverKey){clearSlot('hover');hoverKey='';}return;}
+    const k=h.object.uuid+'#'+h.faceIndex;if(k===hoverKey)return;hoverKey=k;
+    if(sel&&sel.object===h.object&&sel.faceIndex===h.faceIndex){clearSlot('hover');return;}
+    setSlot('hover',h.object,h.faceIndex);
+  }
+  cv.addEventListener('pointermove',e=>{if(!$('pickOn').checked||e.buttons)return;hoverEv={clientX:e.clientX,clientY:e.clientY};if(!hoverBusy){hoverBusy=true;setTimeout(doHover,40);}});
+  cv.addEventListener('pointerleave',()=>{clearSlot('hover');hoverKey='';});
+  window.__pickState=()=>({hover:!!slots.hover,sel:!!slots.sel,hoverKey,over:[slots.hover,slots.sel].map(s=>s?s.userData.m.color.getHex():null)});window.__doHover=e=>{hoverEv=e;doHover();};
+  $('pickOn').onchange=()=>{if(!$('pickOn').checked){clearHl();sel=null;}else listMeshes();};
   $('pickHide').onclick=()=>{if(!sel)return;const g=sel.object.geometry,I=g.index;if(!I)return;if(!saved.has(g))saved.set(g,I.array.slice());const a=I.array[sel.faceIndex*3];I.array[sel.faceIndex*3+1]=a;I.array[sel.faceIndex*3+2]=a;I.needsUpdate=true;clearHl();$('pickOut').textContent+='\n→ 已隱藏 '+sel.object.name+' #'+sel.faceIndex+'（實際上是把它變成退化三角面）';};
   $('pickRestore').onclick=()=>{saved.forEach((arr,g)=>{g.index.array.set(arr);g.index.needsUpdate=true;});saved.clear();clearHl();};
   $('pickCopy').onclick=()=>navigator.clipboard&&navigator.clipboard.writeText($('pickOut').textContent);
