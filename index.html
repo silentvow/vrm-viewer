@@ -41,7 +41,7 @@ details.sec[open]>summary::before{transform:rotate(90deg)}
 details.sec>summary:hover{color:var(--fg)}
 </style>
 <div id="side">
-  <h1>VRM 檢視器</h1>
+  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.0.0</span></h1>
   <div class="sub">在瀏覽器裡檢視 VRM 模型、播放 VRMA 動作、擺測試姿勢、調表情。檔案只在你的瀏覽器內讀取，不會上傳。</div>
 
   <h2>VRM 模型</h2>
@@ -742,6 +742,6 @@ if($('pickOn')){(function(){
   $('seamRun').onclick=()=>{seamScan().catch(e=>{$('seamOut').textContent='錯誤：'+e.message;});};
   $('meshRefresh').onclick=listMeshes;
 })();}
-window.__ALL_POSES=ALL_POSES;window.__startPose=startPose;window.__loadVRMA=(...x)=>loadVRMA(...x);window.__FILES=()=>FILES;window.__step=(dt)=>{if(!vrm)return;if(mixer&&action)mixer.update(dt);vrm.update(dt);};window.__render=()=>{ctl.update();renderer.render(scene,cam);};window.__finishPose=()=>{if(poseK&&poseM)applyPoseK(vrm,poseK.comp,poseM,1);vrm.update(0.001);};
+window.__VERSION=($('ver')||{}).textContent;window.__ALL_POSES=ALL_POSES;window.__startPose=startPose;window.__loadVRMA=(...x)=>loadVRMA(...x);window.__FILES=()=>FILES;window.__step=(dt)=>{if(!vrm)return;if(mixer&&action)mixer.update(dt);vrm.update(dt);};window.__render=()=>{ctl.update();renderer.render(scene,cam);};window.__finishPose=()=>{if(poseK&&poseM)applyPoseK(vrm,poseK.comp,poseM,1);vrm.update(0.001);};
 tick();
 </script>
