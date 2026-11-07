@@ -40,8 +40,6 @@ details.sec>summary::before{content:"▸";display:inline-block;width:1em;transit
 details.sec[open]>summary::before{transform:rotate(90deg)}
 details.sec>summary:hover{color:var(--fg)}
 </style>
-</head>
-<body>
 <div id="side">
   <h1>VRM 檢視器</h1>
   <div class="sub">在瀏覽器裡檢視 VRM 模型、播放 VRMA 動作、擺測試姿勢、調表情。檔案只在你的瀏覽器內讀取，不會上傳。</div>
@@ -63,6 +61,7 @@ details.sec>summary:hover{color:var(--fg)}
 
   <h2>測試姿勢（不需要 VRMA）</h2>
   <div class="row"><select id="pose" class="grow" aria-label="測試姿勢"></select><button id="applyPose">套用</button></div>
+  <div class="row" style="align-items:center;gap:6px" title="頭、頸、上身分攤轉向鏡頭（胸0.1／上胸0.15／頸0.3／頭0.45，上限70°），眼睛也跟著看；0＝關閉"><label class="sub" style="white-space:nowrap">看向鏡頭 <span id="gzV">0.0</span></label><input id="gz" class="grow" type="range" min="0" max="1" step="0.05" value="0"></div>
   <div class="sub">選了就套用；0.5 秒內過渡，彈簧骨照常運作。臀部高度會自動讓腳或膝蓋貼地。</div>
 
   <h2>表情</h2>
@@ -159,57 +158,73 @@ const say=(t,err)=>{const e=$('msgt');e.textContent=t;e.style.background=err?'rg
 // ── 手與腳 ──
 //  · palm：手掌朝向 'in'（朝身體中線）|'down'|'up'|'forward'|'back'|'out'，或 {L,R}。預設：手垂下用 'in'，其他用 'down'
 //  · hand：{L:{dir:[o,f,u],palm}}，手的方向與前臂不同時用（手腕彎折，例如手掌撐地：dir:[0,1,0],palm:'down'）
+//  · palm 也可以是向量 [o,f,u]（手掌法線方向，o＝向外、f＝向前、u＝向上）
+//  · fingers 也可以是 4 組 [近節,中節,遠節] 角度（食指、中指、無名指、小指），或 {L,R}
 //  · fingers：'relaxed'（預設，輕微彎曲）|'open'|'fist'|'point'（食指伸直），或 {L,R}
 //  · feet：'flat'（腳底貼地，預設，會帶輕微外八 footYaw 預設 10°）|'up'|'down'|'back'|null|數字（世界座標下的腳尖下壓角度）
 //          |'point'（腳尖伸直）|'relax'（放鬆）|'flex'（勾腳）|{local:度數}（相對小腿），或 {L,R}
-const ARM_DOWN=[[0.25,0,-1],[0.25,0,-1]];
+// ── 姿勢品質說明 ──
+// 「叉腰」「金雞獨立」「跑步」「走路」「側臥」「I 字朝天蹬」「坐椅子」是用 XR Animator（SystemAnimatorOnline）附的 MMD 動作檔
+// （model_pose01／03、run_H16、walk_A34、Mixamo Female Laying Pose01、i-shaped_balance_TDA、Mixamo Female Sitting Pose01）
+// 實際套到本模型上量測出方向、角度、手指彎曲後寫成的定義；站姿類的手臂左右不同、腳一前一後（骨盆水平，不歪向一邊）。
+// 這些數值源自第三方動作檔（i-shaped_balance 為 CC0，其餘授權未明或僅限非商用），公開散佈前請自行確認。
+const ARM_DOWN=[[0.22,0.05,-0.97],[0.15,0.35,-0.92]];
+// 自然站姿的手臂：兩側略不同（上臂微開、前臂微向前，手肘有彎），不是兩條一樣的直線
+const ARM_HANG=[{L:[[0.20,0.15,-0.97],[0.15,0.38,-0.91]],R:[[0.26,-0.05,-0.96],[0.20,0.22,-0.96]]},{L:[[0.26,-0.05,-0.96],[0.20,0.22,-0.96]],R:[[0.20,0.15,-0.97],[0.15,0.38,-0.91]]}];
+// 自然站姿的腳：一腳微前（膝蓋放鬆）、一腳微後，腳尖外開角度左右不同；骨盆保持水平（不歪向一邊）。三種輪流用，不是兩腳平行對稱
+const STANCE=[
+  {legs:{L:[[0.06,0.22,-0.97],[0.04,-0.03,-1]],R:[[0.10,-0.10,-0.99],[0.10,-0.12,-0.99]]},footYaw:{L:10,R:18}},
+  {legs:{L:[[0.10,-0.10,-0.99],[0.10,-0.12,-0.99]],R:[[0.06,0.22,-0.97],[0.04,-0.03,-1]]},footYaw:{L:18,R:10}},
+  {legs:{L:[[0.14,0.04,-0.99],[0.12,0.0,-1]],R:[[0.12,-0.06,-0.99],[0.10,-0.08,-0.99]]},footYaw:{L:16,R:12}},
+];
 const STAND=[[0.06,0,-1],[0.06,0,-1]];
 const POSE_GROUPS=[
  {group:'站姿',poses:[
-  {name:'A 字站姿（自然）',arms:{sym:ARM_DOWN},legs:{sym:STAND},contra:'L'},
-  {name:'八字站（雙腳外開）',arms:{sym:ARM_DOWN},legs:{sym:[[0.5,0,-1],[0.5,0,-1]]},footYaw:20},
-  {name:'叉腰',arms:{sym:[[0.5,-0.2,-1],[-0.8,0.25,-0.5]]},legs:{sym:STAND},contra:'R',palm:'in',fingers:'open'},
-  {name:'雙手背後',arms:{sym:[[0.1,-0.4,-1],[-1,-0.2,-0.3]]},legs:{sym:STAND},contra:'R',palm:'back'},
+  {name:'A 字站姿（自然）',arms:ARM_HANG[0],legs:STANCE[0].legs,footYaw:STANCE[0].footYaw},
+  {name:'八字站（雙腳外開）',arms:ARM_HANG[1],legs:{sym:[[0.32,0,-1],[0.32,0,-1]]},footYaw:{L:18,R:14}},
+  {name:"叉腰",natural:false,straightArms:true,straightLegs:true,arms:{L:[[0.68,0.22,-0.7],[0.22,0.92,-0.32]],R:[[0.99,0.06,-0.13],[-0.61,0.73,-0.33]]},legs:{L:[[-0.01,0.46,-0.89],[-0.01,-0.34,-0.94]],R:[[-0.08,0.02,-1],[-0.08,-0.01,-1]]},hand:{L:{dir:[0.31,0.78,-0.54],palm:[-0.39,-0.44,-0.81]},R:{dir:[-0.52,0.14,-0.84],palm:[0.56,-0.72,-0.42]}},fingers:{L:[[59,46,0],[70,52,14],[71,70,23],[79,63,39]],R:[[31,0,0],[33,3,0],[38,16,7],[35,21,20]]},feet:{L:35,R:"flat"},footYaw:{L:35,R:-22},hips:{bend:0,twist:13.2,lean:0},torso:{bend:2.2,twist:-6.9,lean:-0.6},head:{bend:5,twist:-14.5,lean:-3.1},hipsY:1.16,shift:[-0.01,0]},
+  {name:'雙手背後',arms:{sym:[[0.1,-0.4,-1],[-1,-0.2,-0.3]]},legs:STANCE[1].legs,footYaw:STANCE[1].footYaw,palm:'back'},
+  {name:"走路（貓步）",natural:false,straightArms:true,straightLegs:true,arms:{L:[[0.71,-0.29,-0.65],[0.75,0.03,-0.66]],R:[[0.7,-0.1,-0.71],[0.64,0.31,-0.7]]},legs:{L:[[-0.05,0.19,-0.98],[-0.05,0.16,-0.99]],R:[[-0.08,-0.18,-0.98],[-0.08,-0.21,-0.97]]},hand:{L:{dir:[0.65,0.02,-0.76],palm:[-0.77,0.19,-0.62]},R:{dir:[0.58,0.29,-0.76],palm:[-0.81,-0.04,-0.58]}},fingers:{L:[[23,11,19],[33,6,17],[22,18,23],[18,18,21]],R:[[23,11,19],[33,6,17],[22,18,23],[18,18,21]]},feet:{L:-14,R:11},footYaw:{L:-10,R:-10},torso:{bend:0.8,twist:2,lean:-0.7},head:{bend:0,twist:0,lean:0},hipsY:1.15,shift:[-0.01,0]},
  ]},
  {group:'手臂（胸前、身前）',poses:[
-  {name:'雙臂交叉（胸前）',arms:{sym:[[0.15,0.3,-1],[-1,0.3,0.1]]},legs:{sym:STAND},contra:'L',palm:'in'},
-  {name:'雙手合十',arms:{sym:[[0.15,0.25,-1],[-0.5,0.7,0.5]]},legs:{sym:STAND},palm:'in',fingers:'open'},
-  {name:'單手按胸口（左手）',arms:{L:[[0.2,0.2,-1],[-1,0.45,0.3]],R:ARM_DOWN},legs:{sym:STAND},contra:'R',palm:{L:'in',R:'in'},fingers:{L:'open',R:'relaxed'}},
-  {name:'雙手愛心（臉前）',arms:{sym:[[0.7,0.5,-0.2],[-0.55,0.75,0.35]]},legs:{sym:STAND},palm:'in',fingers:'open',head:{lean:4}},
-  {name:'雙臂前舉（殭屍）',arms:{sym:[[0,1,0],[0,1,0]]},legs:{sym:STAND},palm:'down',fingers:'open'},
-  {name:'張開雙臂（擁抱）',arms:{sym:[[0.6,0.7,0],[0.2,0.9,0]]},legs:{sym:STAND},palm:'forward',fingers:'open',torso:{bend:-4}},
-  {name:'單手指向前方（左手）',arms:{L:[[0,1,0.1],[0,1,0.1]],R:ARM_DOWN},legs:{sym:STAND},contra:'R',palm:{L:'in',R:'in'},fingers:{L:'point',R:'relaxed'}},
+  {name:'雙臂交叉（胸前）',arms:{sym:[[0.15,0.3,-1],[-1,0.3,0.1]]},legs:STANCE[2].legs,footYaw:STANCE[2].footYaw,palm:'in'},
+  {name:'雙手合十',arms:{sym:[[0.15,0.25,-1],[-0.5,0.7,0.5]]},legs:STANCE[0].legs,footYaw:STANCE[0].footYaw,palm:'in',fingers:'open'},
+  {name:'單手按胸口（左手）',arms:{L:[[0.2,0.2,-1],[-1,0.45,0.3]],R:ARM_DOWN},legs:STANCE[1].legs,footYaw:STANCE[1].footYaw,palm:{L:'in',R:'in'},fingers:{L:'open',R:'relaxed'}},
+  {name:'雙手愛心（臉前）',arms:{sym:[[0.7,0.5,-0.2],[-0.55,0.75,0.35]]},legs:STANCE[2].legs,footYaw:STANCE[2].footYaw,palm:'in',fingers:'open',head:{lean:4}},
+  {name:'雙臂前舉（殭屍）',arms:{sym:[[0,1,0],[0,1,0]]},legs:STANCE[0].legs,footYaw:STANCE[0].footYaw,palm:'down',fingers:'open'},
+  {name:'張開雙臂（擁抱）',arms:{sym:[[0.6,0.7,0],[0.2,0.9,0]]},legs:STANCE[1].legs,footYaw:STANCE[1].footYaw,palm:'forward',fingers:'open',torso:{bend:-4}},
+  {name:'單手指向前方（左手）',arms:{L:[[0,1,0.1],[0,1,0.1]],R:ARM_DOWN},legs:STANCE[2].legs,footYaw:STANCE[2].footYaw,palm:{L:'in',R:'in'},fingers:{L:'point',R:'relaxed'}},
  ]},
  {group:'手臂（頭部附近、上舉）',poses:[
-  {name:'雙手托腮',arms:{sym:[[0.55,0.3,-0.45],[-0.35,0.35,1]]},legs:{sym:STAND},contra:'L',palm:'in',head:{lean:6}},
-  {name:'雙手抱頭（手放腦後）',arms:{sym:[[0.85,-0.2,0.45],[-0.6,-0.55,0.6]]},legs:{sym:STAND},palm:'in'},
-  {name:'敬禮（右手）',arms:{R:[[0.6,0.5,0],[-0.7,0.4,0.6]],L:ARM_DOWN},legs:{sym:STAND},palm:{R:'down',L:'in'},fingers:{R:'open',L:'relaxed'}},
-  {name:'揮手（左手）',arms:{L:[[0.8,0.2,0.6],[0.1,0,1]],R:ARM_DOWN},legs:{sym:STAND},contra:'R',palm:{L:'forward',R:'in'},fingers:{L:'open',R:'relaxed'},head:{lean:5}},
-  {name:'頭頂比愛心',arms:{sym:[[0.15,0.15,1],[-0.55,0.1,0.85]]},legs:{sym:STAND},head:{bend:8},palm:'in',fingers:'open'},
-  {name:'雙手高舉（Y 字）',arms:{sym:[[0.45,0,1],[0.45,0,1]]},legs:{sym:STAND},palm:'forward',fingers:'open',torso:{bend:-5},head:{bend:-6}},
+  {name:'雙手托腮',arms:{sym:[[0.55,0.3,-0.45],[-0.35,0.35,1]]},legs:STANCE[0].legs,footYaw:STANCE[0].footYaw,palm:'in',head:{lean:6}},
+  {name:'雙手抱頭（手放腦後）',arms:{sym:[[0.85,-0.2,0.45],[-0.6,-0.55,0.6]]},legs:STANCE[1].legs,footYaw:STANCE[1].footYaw,palm:'in'},
+  {name:'敬禮（右手）',arms:{R:[[0.6,0.5,0],[-0.7,0.4,0.6]],L:ARM_DOWN},legs:STANCE[2].legs,footYaw:STANCE[2].footYaw,palm:{R:'down',L:'in'},fingers:{R:'open',L:'relaxed'}},
+  {name:'揮手（左手）',arms:{L:[[0.8,0.2,0.6],[0.1,0,1]],R:ARM_DOWN},legs:STANCE[0].legs,footYaw:STANCE[0].footYaw,palm:{L:'forward',R:'in'},fingers:{L:'open',R:'relaxed'},head:{lean:5}},
+  {name:'頭頂比愛心',arms:{sym:[[0.15,0.15,1],[-0.55,0.1,0.85]]},legs:STANCE[1].legs,footYaw:STANCE[1].footYaw,head:{bend:8},palm:'in',fingers:'open'},
+  {name:'雙手高舉（Y 字）',arms:{sym:[[0.45,0,1],[0.45,0,1]]},legs:STANCE[2].legs,footYaw:STANCE[2].footYaw,palm:'forward',fingers:'open',torso:{bend:-5},head:{bend:-6}},
  ]},
  {group:'上身與頭部',poses:[
-  {name:'鞠躬 45°',arms:{sym:[[0.1,0.1,-1],[0.1,0.1,-1]]},legs:{sym:STAND},torso:{bend:45},palm:'in'},
-  {name:'彎腰 90°（摸腳尖）',arms:{sym:[[0.05,0.1,-1],[0.05,0.1,-1]]},legs:{sym:STAND},torso:{bend:90},head:{bend:-20},knee:12},
-  {name:'向左側彎',arms:{L:[[0.1,0,-1],[0.1,0,-1]],R:[[0.7,0,0.7],[0.2,0,1]]},legs:{sym:STAND},torso:{lean:28},palm:{L:'in',R:'in'},fingers:{R:'open',L:'relaxed'}},
-  {name:'扭腰回頭（向左）',arms:{sym:ARM_DOWN},legs:{sym:STAND},torso:{twist:40},head:{twist:35}},
+  {name:'鞠躬 45°',arms:{sym:[[0.1,0.1,-1],[0.1,0.1,-1]]},legs:STANCE[0].legs,footYaw:STANCE[0].footYaw,torso:{bend:45},palm:'in'},
+  {name:'彎腰 90°（摸腳尖）',arms:{sym:[[0.05,0.1,-1],[0.05,0.1,-1]]},legs:STANCE[1].legs,footYaw:STANCE[1].footYaw,torso:{bend:90},head:{bend:-20},knee:12},
+  {name:'向左側彎',arms:{L:[[0.1,0,-1],[0.1,0,-1]],R:[[0.7,0,0.7],[0.2,0,1]]},legs:STANCE[2].legs,footYaw:STANCE[2].footYaw,torso:{lean:28},palm:{L:'in',R:'in'},fingers:{R:'open',L:'relaxed'}},
+  {name:'扭腰回頭（向左）',arms:ARM_HANG[0],legs:STANCE[0].legs,footYaw:STANCE[0].footYaw,torso:{twist:40},head:{twist:35}},
  ]},
  {group:'坐、蹲、跪',poses:[
-  {name:'坐椅子',arms:{sym:[[0.12,0.3,-1],[-0.3,0.9,-0.4]]},legs:{sym:[[0.08,1,0],[0.04,0,-1]]},palm:'down',torso:{bend:4}},
+  {name:"坐椅子",natural:false,straightArms:true,straightLegs:true,arms:{L:[[0.82,0.57,-0.04],[0.59,0.71,0.38]],R:[[-0.44,0.88,-0.2],[-0.85,0.19,0.49]]},legs:{L:[[0.34,0.93,0.15],[0.19,0.16,-0.97]],R:[[-0.67,0.56,0.48],[-0.64,0.19,-0.74]]},hand:{L:{dir:[0.44,0.9,-0.03],palm:[-0.23,0.06,-0.97]},R:{dir:[-1,-0.03,-0.06],palm:[0.09,0.07,-0.99]}},fingers:{L:[[8,19,14],[14,27,12],[11,33,16],[23,35,15]],R:[[13,8,8],[12,13,13],[20,11,12],[20,18,12]]},feet:{L:27,R:-13},footYaw:{L:20,R:-35},torso:{bend:17.6,twist:45.8,lean:0.5},head:{bend:-16,twist:-29.1,lean:-7.7},hipsY:0.65,shift:[0.01,0.02]},
   {name:'深蹲',arms:{sym:[[0.2,0.9,0],[0.1,1,0]]},legs:{sym:[[0.25,0.85,0.45],[0,0.5,-0.87]]},torso:{bend:30},palm:'in',fingers:'open'},
   {name:'跪坐（正坐）',arms:{sym:[[0.1,0.3,-1],[-0.3,0.9,-0.5]]},legs:{sym:[[0.1,0.9,-0.45],[0.0,-1,-0.1]]},feet:'back',palm:'down',torso:{bend:3}},
   {name:'M 字坐（雙膝抬起外開）',arms:{sym:[[0.15,0.4,-1],[-0.3,0.7,-0.6]]},legs:{sym:[[0.7,0.45,0.35],[-0.35,0.2,-0.9]]},palm:'down'},
   {name:'盤腿坐',arms:{sym:[[0.2,0.1,-1],[-0.1,0.9,-0.5]]},legs:{sym:[[0.8,0.6,0],[-0.9,0.4,-0.1]]},feet:null,palm:'up',torso:{bend:4}},
  ]},
  {group:'腿部動作',poses:[
-  {name:'左右劈腿（一字馬）',arms:{sym:ARM_DOWN},legs:{sym:[[1,0,-0.03],[1,0,-0.03]]},straightLegs:true,feet:'up',palm:'down',torso:{bend:3}},
-  {name:'I 字朝天蹬（站立劈腿）',arms:{L:[[0.2,0.5,0.8],[0,0.4,0.9]],R:[[0.9,0,0.2],[0.9,0,0.2]]},legs:{L:[[0,0.3,0.95],[0,0.3,0.95]],R:STAND},torso:{bend:-8},head:{bend:-10},knee:{L:0,R:8},feet:{L:'point',R:'flat'},fingers:{L:'open',R:'open'},palm:{L:'in',R:'down'}},
-  {name:'前後劈腿',arms:{sym:[[0.9,0,0.2],[0.9,0,0.2]]},legs:{L:[[0,1,-0.03],[0,1,-0.03]],R:[[0,-1,-0.03],[0,-1,-0.03]]},straightLegs:true,feet:{L:'up',R:'down'},palm:'down',fingers:'open'},
+  {name:'左右劈腿（一字馬）',arms:ARM_HANG[1],legs:{sym:[[1,0,-0.03],[1,0,-0.03]]},straightLegs:true,feet:'up',palm:'down',torso:{bend:3}},
+  {name:"I 字朝天蹬（站立劈腿）",natural:false,straightArms:true,straightLegs:true,arms:{L:[[0.44,-0.33,0.83],[0.43,0.38,0.81]],R:[[-0.45,-0.09,0.89],[-0.74,-0.61,0.28]]},legs:{L:[[-0.44,0.6,0.67],[-0.54,-0.21,0.81]],R:[[0.27,0.06,-0.96],[0.27,0.03,-0.96]]},hand:{L:{dir:[-0.12,0.43,0.9],palm:[-0.43,-0.85,0.32]},R:{dir:[-0.68,-0.71,0.18],palm:[-0.7,0.71,-0.06]}},fingers:{L:[[-4,-6,0],[-8,0,0],[-8,5,9],[-8,3,14]],R:[[8,15,0],[9,19,0],[5,15,13],[-6,24,16]]},feet:{L:12,R:40},footYaw:{L:-35,R:5},hips:{bend:0,twist:0,lean:-90},torso:{bend:-8.5,twist:-1,lean:76.7},head:{bend:18,twist:8.6,lean:36.2},hipsY:1.61,shift:[0.24,-0.07]},
+  {name:'前後劈腿',arms:{L:[[0.9,-0.1,0.25],[0.8,0.45,0.2]],R:[[0.85,-0.2,0.3],[0.95,0.2,0.05]]},legs:{L:[[0,1,-0.03],[0,1,-0.03]],R:[[0,-1,-0.03],[0,-1,-0.03]]},straightLegs:true,feet:{L:'up',R:'down'},palm:'down',fingers:'open'},
   {name:'弓步（左腳在前）',arms:{sym:[[0.1,0.4,-1],[-0.4,0.8,-0.3]]},legs:{L:[[0.05,0.85,-0.5],[0,0.1,-1]],R:[[0.05,-0.5,-0.85],[0,-0.9,-0.4]]},feet:{L:'flat',R:55},palm:'in',torso:{bend:6}},
-  {name:'抬腿踢（左腳）',arms:{sym:[[0.9,0,0.2],[0.9,0,0.2]]},legs:{L:[[0.1,1,0],[0.1,1,0]],R:STAND},knee:{L:0,R:8},feet:{L:'point',R:'flat'},palm:'down',fingers:'open',torso:{bend:-6}},
-  {name:'金雞獨立（左腳抬起）',arms:{sym:[[0.9,0,0.2],[0.9,0,0.2]]},legs:{L:[[0.05,1,0],[0,0,-1]],R:STAND},knee:{R:6},feet:{L:'relax',R:'flat'},palm:'down',fingers:'open'},
-  {name:'跑步',arms:{L:[[0.2,-0.5,-0.85],[0,0.9,-0.3]],R:[[0.2,0.6,-0.75],[0,0.9,0.3]]},legs:{L:[[0.05,0.85,-0.5],[0,-0.4,-1]],R:[[0.05,-0.6,-0.8],[0,-0.9,-0.4]]},torso:{bend:10},feet:{L:'flex',R:'point'},palm:'in',fingers:'relaxed',head:{bend:-6}},
-  {name:'跳躍（半空）',arms:{sym:[[0.5,0,0.9],[0.5,0,0.9]]},legs:{sym:[[0.1,0.4,-0.9],[0,-0.8,-0.6]]},hipsLift:0.25,feet:'point',palm:'forward',fingers:'open',torso:{bend:-4}},
+  {name:'抬腿踢（左腳）',arms:{L:[[0.9,-0.1,0.25],[0.8,0.45,0.2]],R:[[0.85,-0.2,0.3],[0.95,0.2,0.05]]},legs:{L:[[0.1,1,0],[0.1,1,0]],R:STAND},knee:{L:0,R:8},feet:{L:'point',R:'flat'},palm:'down',fingers:'open',torso:{bend:-6}},
+  {name:"金雞獨立（左腳抬起）",natural:false,straightArms:true,straightLegs:true,arms:{L:[[0.92,-0.3,-0.26],[0.41,0.44,-0.8]],R:[[0.42,-0.29,0.86],[-0.08,-0.79,0.61]]},legs:{L:[[-0.09,0.02,-1],[-0.09,-0.01,-1]],R:[[0,0.99,-0.16],[0.01,-0.64,-0.77]]},hand:{L:{dir:[-0.24,0.74,0.62],palm:[-0.68,0.3,-0.66]},R:{dir:[-0.38,-0.79,0.48],palm:[-0.76,0.02,-0.65]}},fingers:{L:[[52,-5,77],[51,38,16],[56,36,0],[48,54,0]],R:[[29,-8,32],[34,14,41],[37,26,36],[48,33,33]]},feet:{L:"flat",R:50},footYaw:{L:0,R:-35},hips:{bend:2.3,twist:0,lean:0},torso:{bend:-6.6,twist:3.5,lean:0.1},head:{bend:-5.1,twist:16.6,lean:0.5},hipsY:1.16,shift:[0.03,0]},
+  {name:"跑步",natural:false,straightArms:true,straightLegs:true,arms:{L:[[0.82,0.05,-0.57],[0.26,0.92,0.3]],R:[[0.78,-0.21,-0.59],[0.64,0.7,-0.31]]},legs:{L:[[-0.02,0.11,-0.99],[-0.01,-0.71,-0.7]],R:[[0,0.5,-0.86],[0,-0.99,-0.15]]},hand:{L:{dir:[0.56,0.82,0.1],palm:[-0.82,0.55,-0.15]},R:{dir:[0.34,0.89,-0.29],palm:[-0.05,-0.33,-0.94]}},fingers:{L:[[46,115,61],[90,68,115],[96,74,101],[107,87,94]],R:[[46,115,61],[90,68,115],[96,74,101],[107,87,94]]},feet:{L:40,R:82},footYaw:{L:-4,R:0},torso:{bend:9.9,twist:-0.8,lean:-0.6},head:{bend:-6.3,twist:0,lean:-7.4},hipsY:1.11,shift:[0,0]},
+  {name:'跳躍（半空）',arms:{L:[[0.45,0.05,0.9],[0.3,0.15,0.95]],R:[[0.55,-0.05,0.85],[0.45,0.1,0.9]]},legs:{sym:[[0.1,0.4,-0.9],[0,-0.8,-0.6]]},hipsLift:0.25,feet:'point',palm:'forward',fingers:'open',torso:{bend:-4}},
  ]},
  {group:'瑜珈與地面姿勢',poses:[
   {name:'棒式（手杖式，坐姿伸腿）',arms:{sym:[[0.15,0.1,-1],[0.1,0.3,-1]]},legs:{sym:[[0.03,1,0],[0.03,1,0]]},feet:'up',straightLegs:true,straightArms:true,hand:{sym:{dir:[0,1,0],palm:'down'}},fingers:'open'},
@@ -218,12 +233,12 @@ const POSE_GROUPS=[
   {name:'側板式（手撐側撐）',arms:{L:[[0,0,-1],[0,0,-1]],R:[[0,0,1],[0,0,1]]},legs:{L:[[-0.85,0,-0.52],[-0.85,0,-0.52]],R:[[0.85,0,-0.48],[0.85,0,-0.48]]},hips:{lean:90},head:{lean:-70},feet:null,shift:[0.25,0],straightArms:true,straightLegs:true,hand:{L:{dir:[0,1,0],palm:'down'}},palm:{R:'in'},fingers:'open'},
   {name:'側棒式（前臂側撐）',arms:{L:[[0,0,-1],[0,1,-0.05]],R:[[0,0,1],[0,0,1]]},legs:{L:[[-0.96,0,-0.29],[-0.96,0,-0.29]],R:[[0.96,0,-0.27],[0.96,0,-0.27]]},hips:{lean:90},head:{lean:-70},feet:null,shift:[0.25,0],straightArms:true,straightLegs:true,palm:{L:'down',R:'in'},fingers:'open'},
   {name:'眼鏡蛇式',arms:{sym:[[0.12,0,-1],[0.12,0,-1]]},legs:{sym:[[0.05,-1,0],[0.05,-1,0]]},hips:{bend:90},torso:{bend:-58},head:{bend:-25},feet:'back',shift:[0,-0.25],straightArms:true,straightLegs:true,hand:{sym:{dir:[0,1,0],palm:'down'}},fingers:'open'},
-  {name:'側臥',arms:{L:[[1,0,0],[1,0,0]],R:[[1,0.2,-0.1],[1,0.2,-0.1]]},legs:{L:[[-0.9,0.4,-0.1],[-0.8,-0.3,-0.1]],R:[[0.9,0.4,-0.1],[0.8,-0.3,-0.1]]},hips:{lean:90},head:{lean:-20},feet:null,hipsY:0.2,shift:[0.2,0],elbow:25,palm:'down'},
+  {name:"側臥",natural:false,straightArms:true,straightLegs:true,arms:{L:[[0.49,-0.67,0.56],[0.45,0.61,0.65]],R:[[0.99,-0.03,-0.12],[-0.09,-0.48,0.87]]},legs:{L:[[0.16,0.89,-0.42],[0.53,-0.84,0.09]],R:[[-0.98,0.21,0],[-0.97,-0.23,0.03]]},hand:{L:{dir:[0.89,0.22,0.4],palm:[0.16,0.63,-0.76]},R:{dir:[0.75,-0.65,-0.1],palm:[-0.43,-0.55,0.72]}},fingers:{L:[[18,11,11],[20,12,12],[9,20,21],[-4,28,19]],R:[[13,23,19],[17,30,15],[12,34,16],[15,27,8]]},feet:{L:55,R:-15},footYaw:{L:35,R:-35},torso:{bend:8.8,twist:13.8,lean:-69.5},head:{bend:9,twist:13.2,lean:33.8},hipsY:0.22,shift:[0.01,0.01]},
   {name:'四足跪姿（桌面式）',arms:{sym:[[0.1,0,-1],[0.1,0,-1]]},legs:{sym:[[0.05,0,-1],[0,-1,0]]},hips:{bend:72},head:{bend:-35},feet:'back',shift:[0,-0.15],straightArms:true,hand:{sym:{dir:[0,1,0],palm:'down'}},fingers:'open'},
  ]},
 
  {group:'軀幹扭轉',poses:[
-  {name:'回眸站姿（模特兒）',armsRel:true,arms:{L:[[0.75,0.15,0.65],[-0.55,0.35,0.75]],R:[[0.5,-0.2,-1],[-0.8,0.25,-0.5]]},legs:{sym:STAND},contra:'L',torso:{twist:55},head:{twist:-45},palm:{L:'in',R:'in'},fingers:{L:'open',R:'open'}},
+  {name:'回眸站姿（模特兒）',armsRel:true,arms:{L:[[0.75,0.15,0.65],[-0.55,0.35,0.75]],R:[[0.5,-0.2,-1],[-0.8,0.25,-0.5]]},legs:STANCE[1].legs,footYaw:STANCE[1].footYaw,torso:{twist:55},head:{twist:-45},palm:{L:'in',R:'in'},fingers:{L:'open',R:'open'}},
   {name:'三角扭轉式',armsRel:false,arms:{L:[[0.1,0.1,1],[0.1,0.1,1]],R:[[0.15,0.35,-1],[0.15,0.35,-1]]},legs:{L:[[0.1,0.5,-0.86],[0.1,0.5,-0.86]],R:[[0.05,-0.5,-0.86],[0.05,-0.5,-0.86]]},hips:{bend:75},torso:{twist:75},head:{bend:-30,twist:-30},straightArms:true,straightLegs:true,palm:{L:'forward',R:'down'},fingers:'open',feet:{L:'flat',R:'flat'},footYaw:25},
   {name:'扭轉坐姿（半脊椎扭轉式）',armsRel:true,arms:{L:[[0.2,0.7,-0.4],[-0.9,0.4,0.1]],R:[[0.7,-0.6,-0.4],[0.4,-0.8,-0.5]]},legs:{L:[[0.45,0.75,0],[-0.9,-0.4,-0.1]],R:[[-0.1,0.6,0.55],[0.05,0.3,-0.95]]},torso:{twist:-65},head:{twist:-30},feet:{L:null,R:'flat'},palm:{L:'in',R:'down'},hipsY:0.12},
   {name:'新月弓步扭轉（合十）',armsRel:true,arms:{sym:[[0.15,0.25,-1],[-0.5,0.7,0.5]]},legs:{L:[[0.05,0.85,-0.5],[0,0.1,-1]],R:[[0.05,-0.5,-0.85],[0,-0.9,-0.4]]},torso:{twist:-60,bend:8},head:{twist:-15},feet:{L:'flat',R:55},palm:'in',fingers:'open'},
@@ -262,6 +277,7 @@ function measure(vrm){
   const m={Sq:sq,LS:P('leftUpperArm').x>0?1:-1,hips:P('hips'),hipsLocal:N('hips').position.clone(),
     ul:P('leftUpperLeg').distanceTo(P('leftLowerLeg')),ll:P('leftLowerLeg').distanceTo(P('leftFoot')),ankleY:P('leftFoot').y,has:{}};
   for(const b of['spine','chest','upperChest','neck','head','leftShoulder','rightShoulder'])m.has[b]=!!N(b);
+  m.restQ={};for(const b of['chest','upperChest','neck','head'])if(N(b))m.restQ[b]=N(b).getWorldQuaternion(new Q());
   for(const s of['left','right'])for(const f of['Index','Middle','Ring','Little'])for(const k of['Proximal','Intermediate','Distal'])m.has[s+f+k]=!!N(s+f+k);
   return m;
 }
@@ -311,14 +327,15 @@ function computePose(vrm,def,m){
     const rest=new V3(sg,0,0);
     const w1=new V3(sg*a[0][0],a[0][2],a[0][1]).normalize();let w2=new V3(sg*a[1][0],a[1][2],a[1][1]).normalize();
     if(def.armsRel){w1.applyQuaternion(Dtorso);w2.applyQuaternion(Dtorso);}
-    if(!def.straightArms&&angleDeg(w1,w2)<6)w2=bendToward(w1,F,def.elbow??10);
+    if(!def.straightArms&&angleDeg(w1,w2)<6)w2=bendToward(w1,F,def.elbow??14);
     const D1=new Q().setFromUnitVectors(rest,w1);let D2=new Q().setFromUnitVectors(rest,w2);
     // hand: direction (default: continuation of the forearm) and palm normal
     const hd=pick(def.hand,key);const hdir=hd&&hd.dir?new V3(sg*hd.dir[0],hd.dir[2],hd.dir[1]).normalize():w2.clone();
     if(def.armsRel&&hd&&hd.dir)hdir.applyQuaternion(Dtorso);
     let palm=hd&&hd.palm?hd.palm:pick(def.palm,key);if(!palm)palm=(hdir.y<-0.6)?'in':'down';
-    const pn=PALM[palm](sg);if(def.armsRel)pn.applyQuaternion(Dtorso);
-    const D3=handFrame(sg,hdir,pn);
+    const pn=Array.isArray(palm)?new V3(sg*palm[0],palm[2],palm[1]).normalize():PALM[palm](sg);if(def.armsRel)pn.applyQuaternion(Dtorso);
+    let D3=handFrame(sg,hdir,pn);
+    if(!(hd&&hd.dir))D3=D3.clone().multiply(axq(AZ,-sg*(def.wrist??12)));   // 手腕不是死直：預設向掌心側微彎 12°（參考真人姿勢，手腕都有彎折）
     // forearm takes half of the twist between forearm and hand (the model has no twist bones)
     const rel=inv(D2).multiply(D3),ax=new V3(sg,0,0),v=new V3(rel.x,rel.y,rel.z),p=ax.clone().multiplyScalar(v.dot(ax));
     let tw=new Q(p.x,p.y,p.z,rel.w);if(tw.lengthSq()<1e-9)tw=new Q();else tw.normalize();
@@ -326,9 +343,10 @@ function computePose(vrm,def,m){
     out[side+'UpperArm']=conj(inv(Dtorso).multiply(D1));out[side+'LowerArm']=conj(inv(D1).multiply(D2));out[side+'Hand']=conj(inv(D2).multiply(D3));
     // fingers
     const fg=pick(def.fingers,key)||'relaxed';
-    const curl={relaxed:[14,20,10],open:[0,0,0],fist:[78,92,60]};
+    // 手指形狀（食指、中指、無名指、小指各自的 [近節,中節,遠節] 彎曲角度；每根手指不一樣，不是整齊的一排）。依參考 VMD 姿勢的真人手形量得
+    const curl={relaxed:[[22,12,16],[30,10,16],[24,16,17],[20,18,17]],open:[[5,4,3],[3,3,2],[7,5,3],[11,7,4]],fist:[[72,88,52],[80,94,55],[84,92,55],[86,88,50]]};
     ['Index','Middle','Ring','Little'].forEach((f,i)=>{
-      const mode=(fg==='point'&&i>0)?'fist':(fg==='point'?'open':fg);const c=curl[mode]||curl.relaxed;const extra=mode==='relaxed'?i*3:0;
+      const mode=(fg==='point'&&i>0)?'fist':(fg==='point'?'open':fg);const c=Array.isArray(fg)?fg[i]:(curl[mode]||curl.relaxed)[i];const extra=0;
       ['Proximal','Intermediate','Distal'].forEach((k,j)=>{if(!m.has[side+f+k])return;out[side+f+k]=conj(axq(AZ,-sg*(c[j]+extra*(j===0?1:0.7))));});
     });
   }
@@ -350,8 +368,9 @@ function computePose(vrm,def,m){
     if(fm&&typeof fm==='object'&&'local' in fm)out[side+'Foot']=conj(axq(AX,fm.local));
     else{
       let Df=null;
-      if(fm==='flat')Df=axq(AY,(def.footYaw??10)*sg);
-      else if(typeof fm==='number')Df=axq(AY,(def.footYaw??10)*sg).multiply(axq(AX,fm));
+      const fy=(def.footYaw&&typeof def.footYaw==='object'?def.footYaw[key]:def.footYaw)??10;
+      if(fm==='flat')Df=axq(AY,fy*sg);
+      else if(typeof fm==='number')Df=axq(AY,fy*sg).multiply(axq(AX,fm));
       else if(fm==='back')Df=axq(AX,180);else if(fm==='up')Df=axq(AX,-90);else if(fm==='down')Df=axq(AX,90);
       if(Df)out[side+'Foot']=conj(inv(D2).multiply(Df));
     }
@@ -370,6 +389,25 @@ function applyPoseK(vrm,comp,m,k){
   const id=new Q();
   for(const [b,q] of Object.entries(comp.quats)){const n=vrm.humanoid.getNormalizedBoneNode(b);if(n)n.quaternion.copy(id).slerp(q,k);}
   const hp=vrm.humanoid.getNormalizedBoneNode('hips');hp.position.copy(m.hipsLocal).addScaledVector(comp.hipsOffset,k);
+}
+
+// ── 看向鏡頭（頭、頸、上身分攤轉動，像真人轉頭時整個上身一起帶一點）──
+// 在姿勢（或 VRMA）套用之後每幀呼叫；轉動量 = k × 面向鏡頭所需的旋轉（上限 70°）。權重：胸 0.1、上胸 0.15、頸 0.3、頭 0.45。
+// 每根骨頭記住自己「沒加視線」的旋轉；若骨頭值沒被別人改過就先還原，所以暫停或靜止時不會越轉越多。
+const GZ_W=[['chest',0.1],['upperChest',0.15],['neck',0.3],['head',0.45]],gzState=new WeakMap();
+function gazeAt(vrm,m,target,k){
+  const N=n=>vrm.humanoid.getNormalizedBoneNode(n);let st=gzState.get(vrm);if(!st){st={};gzState.set(vrm,st);}
+  for(const [b] of GZ_W){const n=N(b);if(!n)continue;const s=st[b];if(s&&s.out&&n.quaternion.equals(s.out))n.quaternion.copy(s.base);else st[b]={base:n.quaternion.clone(),out:null};}
+  const head=N('head');if(!head||!k||!m.restQ||!m.restQ.head)return;
+  vrm.scene.updateMatrixWorld(true);
+  const hp=head.getWorldPosition(new V3());
+  const F=new V3(0,0,1).applyQuaternion(head.getWorldQuaternion(new Q()).multiply(inv(m.restQ.head)));
+  const Rf=new Q().setFromUnitVectors(F,target.clone().sub(hp).normalize());if(Rf.w<0){Rf.x*=-1;Rf.y*=-1;Rf.z*=-1;Rf.w*=-1;}
+  const ang=2*Math.acos(Math.min(1,Rf.w))/D2R;if(ang<0.05)return;
+  const Rt=new Q().slerp(Rf,Math.min(1,70/ang)*k);
+  const have=GZ_W.filter(([b])=>N(b)),tot=have.reduce((a,[,w])=>a+w,0);
+  for(const [b,w] of have){const n=N(b),Rb=new Q().slerp(Rt,w/tot);const pw=n.parent.getWorldQuaternion(new Q());
+    n.quaternion.copy(inv(pw).multiply(Rb).multiply(pw).multiply(n.quaternion));n.updateMatrixWorld(true);st[b].out=n.quaternion.clone();}
 }
 
 // ===== 檢視器 =====
@@ -468,6 +506,8 @@ function startPose(name){
   const def=ALL_POSES[name];if(!def)return;
   poseK={comp:computePose(vrm,def,poseM),t0:performance.now(),name};say('姿勢：'+name);updateInfo();
 }
+const GZ={k:0};window.__GZ=GZ;window.__gaze=()=>{if(vrm&&poseM)gazeAt(vrm,poseM,cam.getWorldPosition(new THREE.Vector3()),GZ.k);};
+$('gz').oninput=()=>{GZ.k=+$('gz').value;$('gzV').textContent=GZ.k.toFixed(2);if(vrm&&vrm.lookAt)vrm.lookAt.target=GZ.k>0?cam:null;};
 $('applyPose').onclick=()=>startPose($('pose').value);$('pose').onchange=()=>startPose($('pose').value);
 // ---------- expressions
 const manual=new Map();let autoBlink=false,blinkT=0,nextBlink=2;
@@ -611,6 +651,7 @@ function tick(){
       if(clip){const t=action.time%(clip.duration||1);$('tm').textContent=`${t.toFixed(2)} / ${clip.duration.toFixed(2)} s`;if(playing)$('seek').value=Math.round(1000*t/(clip.duration||1));}
     }else{$('tm').textContent='無動作';}
     if(poseK&&poseM){applyPoseK(vrm,poseK.comp,poseM,Math.min(1,(performance.now()-poseK.t0)/500));}
+    if(poseM)gazeAt(vrm,poseM,cam.getWorldPosition(new THREE.Vector3()),GZ.k);
     exprTick(dt);
     vrm.update(dt);
   }
@@ -701,6 +742,6 @@ if($('pickOn')){(function(){
   $('seamRun').onclick=()=>{seamScan().catch(e=>{$('seamOut').textContent='錯誤：'+e.message;});};
   $('meshRefresh').onclick=listMeshes;
 })();}
-window.__ALL_POSES=ALL_POSES;window.__startPose=startPose;window.__render=()=>{ctl.update();renderer.render(scene,cam);};window.__finishPose=()=>{if(poseK&&poseM)applyPoseK(vrm,poseK.comp,poseM,1);vrm.update(0.001);};
+window.__ALL_POSES=ALL_POSES;window.__startPose=startPose;window.__loadVRMA=(...x)=>loadVRMA(...x);window.__FILES=()=>FILES;window.__step=(dt)=>{if(!vrm)return;if(mixer&&action)mixer.update(dt);vrm.update(dt);};window.__render=()=>{ctl.update();renderer.render(scene,cam);};window.__finishPose=()=>{if(poseK&&poseM)applyPoseK(vrm,poseK.comp,poseM,1);vrm.update(0.001);};
 tick();
 </script>
