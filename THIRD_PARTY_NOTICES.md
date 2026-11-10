@@ -5,9 +5,10 @@ Angry, Blush, Clapping, Goodbye, Jump, LookAround, Relax, Sad, Sleepy, Surprised
 - Source: https://github.com/tk256ailab/vrm-viewer (VRMA folder)
 - License: MIT (see that repository's LICENSE)
 
-three-vrm_test (moves the right upper arm only)
-- Source: https://github.com/pixiv/three-vrm (packages/three-vrm-animation/examples/models/test.vrma)
-- License: MIT
+## Mixamo "X Bot" motions (embedded in index.html as base64, ids "XBot ...")
+Boxing, Breakdance Ending 1, Falling, Flair, Flying Kick, Hip Hop Dancing, Hurricane Kick, Jump, Martelo 2, Punching Bag, Swimming, Wave Hip Hop Dance, Zombie Punching, Zombie Stumbling
+- Source: Mixamo (https://www.mixamo.com), X Bot character, FBX converted to VRMA
+- Not MIT. Adobe's Mixamo FAQ states characters and animations are royalty free for personal, commercial and non-profit projects (https://helpx.adobe.com/creative-cloud/faq/mixamo-faq.html); it does not address redistributing the raw animation files, so if you are a rights holder and want these removed, please open an issue.
 
 ## Libraries loaded at runtime from jsDelivr
 - three.js 0.184.0 — MIT — https://github.com/mrdoob/three.js
