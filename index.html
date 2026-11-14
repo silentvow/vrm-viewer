@@ -45,7 +45,7 @@ body.nosd #side{display:none}
 #sidebtn:hover,#sidebtn:focus-visible{opacity:1}
 </style>
 <div id="side">
-  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.7.0</span></h1>
+  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.7.1</span></h1>
   <div class="sub">在瀏覽器裡檢視 VRM 模型、播放 VRMA 動作、擺姿勢、調表情、換背景、配音樂。檔案只在你的瀏覽器內讀取，不會上傳。</div>
 
 
@@ -678,33 +678,112 @@ function base(scene,name,themes,first,lightsCfg){
   return S;
 }
 // ======================================================================= 1. 攝影棚
+// 封閉的暗灰色攝影棚（單位：公尺，角色站在原點、面向 +Z）：拋光水泥地板、吸音板牆、深色天花板＋軌道燈與外露管線；
+// 器材：弧形背景紙（cyc）＋背景架、柔光箱／八角罩／雷達罩／傘＋燈架、C 型燈架懸臂、V-flat、蘋果箱＋圓凳、連線桌、背景紙捲架。
+// 主題＝背景紙與牆地面的配色（預設「暗灰」）。
 function createStudio(scene){
-  const TH={white:{name:'純白',bg:['#f6f7fb','#dfe3ec'],soft:'#ffffff'},gray:{name:'中灰',bg:['#a4abb7','#646b77'],soft:'#f2f4f8'},pink:{name:'粉紅紙',bg:['#ffe6ef','#f4b3ca'],soft:'#fff6fa'},
-            blue:{name:'天藍紙',bg:['#e1eeff','#8fb3ea'],soft:'#f4f9ff'},black:{name:'黑色',bg:['#2c2e36','#0a0b0f'],soft:'#cfd5e6'}};
-  const S=base(scene,'studio',TH,'white',null);
-  const floorMat=new THREE.MeshBasicMaterial({map:radialTex('#fff','#fff'),transparent:true,depthWrite:true});
-  const floor=new THREE.Mesh(new THREE.CircleGeometry(16,64),floorMat);floor.rotation.x=-Math.PI/2;floor.position.y=-0.003;S.group.add(floor);
-  const shTex=radialTex('rgba(0,0,0,0.55)','rgba(0,0,0,0)');
-  const shadow=new THREE.Mesh(new THREE.PlaneGeometry(1.7,1.1),new THREE.MeshBasicMaterial({map:shTex,transparent:true,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2}));shadow.rotation.x=-Math.PI/2;shadow.position.y=0.002;S.group.add(shadow);
-  const shadow2=new THREE.Mesh(new THREE.PlaneGeometry(4.2,3),new THREE.MeshBasicMaterial({map:shTex,transparent:true,opacity:0.22,depthWrite:false}));shadow2.rotation.x=-Math.PI/2;shadow2.position.y=0.001;S.group.add(shadow2);
-  const softMat=new THREE.MeshBasicMaterial({color:0xffffff}),frameMat=new THREE.MeshBasicMaterial({color:0x24262c});
-  const boxes=[];
-  for(const [x,z,ry] of [[-3.6,0.4,0.55],[3.6,0.4,-0.55]]){
-    const g=new THREE.Group();g.position.set(x,1.7,z);g.rotation.y=ry;
-    const f=new THREE.Mesh(new THREE.BoxGeometry(1.45,2.3,0.12),frameMat);g.add(f);
-    const p=new THREE.Mesh(new THREE.PlaneGeometry(1.3,2.15),softMat.clone());p.position.z=0.07;g.add(p);boxes.push(p);
-    const leg=new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.03,2.0,8),frameMat);leg.position.set(0,-1.7,-0.1);g.add(leg);
-    for(const a of[0,2.1,4.2]){const l=new THREE.Mesh(new THREE.CylinderGeometry(0.025,0.025,0.9,6),frameMat);l.position.set(Math.sin(a)*0.35,-2.6+0.0,Math.cos(a)*0.35-0.1);l.rotation.set(Math.cos(a)*0.4,0,-Math.sin(a)*0.4);g.add(l);}
-    S.group.add(g);
-  }
-  const bar=new THREE.Mesh(new THREE.BoxGeometry(4.2,0.14,0.5),softMat.clone());bar.position.set(0,4.3,-0.4);S.group.add(bar);boxes.push(bar);
-  const barF=new THREE.Mesh(new THREE.BoxGeometry(4.35,0.2,0.62),frameMat);barF.position.set(0,4.34,-0.42);S.group.add(barF);
+  const TH={gray:{name:'暗灰',paper:'#5e636c',wall:'#2e3136',floor:'#43474d',ceil:'#17181b',soft:'#f4f6fb'},
+            black:{name:'黑棚',paper:'#202126',wall:'#18191c',floor:'#25272b',ceil:'#0e0f11',soft:'#e4e8f2'},
+            white:{name:'白紙',paper:'#e0e2e8',wall:'#33363c',floor:'#4a4e55',ceil:'#17181b',soft:'#ffffff'},
+            pink:{name:'粉紅紙',paper:'#dc9fb7',wall:'#2f3237',floor:'#45494f',ceil:'#17181b',soft:'#fff3f8'},
+            blue:{name:'天藍紙',paper:'#7399d0',wall:'#2e3136',floor:'#44484f',ceil:'#17181b',soft:'#f2f8ff'}};
+  const S=base(scene,'studio',TH,'gray',null);
+  const V3=THREE.Vector3,G=S.group,boxes=[];
+  const M=(c,r=.7,m=.15,o={})=>new THREE.MeshStandardMaterial({color:c,roughness:r,metalness:m,...o});
+  const dark=M(0x16171a,.8,.1),metal=M(0x9aa0aa,.45,.6),steel=M(0x2a2c31,.5,.5),wood=M(0xb08657,.8,0);
+  const cyl=(a,b,r,mat,seg=8)=>{const A=new V3(...a),B=new V3(...b),d=B.clone().sub(A);const m=new THREE.Mesh(new THREE.CylinderGeometry(r,r,d.length(),seg),mat);m.position.copy(A).addScaledVector(d,.5);m.quaternion.setFromUnitVectors(new V3(0,1,0),d.normalize());return m;};
+  const box=(w,h,d,mat,x=0,y=0,z=0)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);m.position.set(x,y,z);return m;};
+  const facing=(g,x,z)=>{g.rotation.y=Math.atan2(-x,-z);};
+  // ---- 房間：地板（貼圖，隨主題重畫）、四面牆、天花板
+  const floorMat=new THREE.MeshBasicMaterial({map:null}),floor=new THREE.Mesh(new THREE.PlaneGeometry(16,16),floorMat);floor.rotation.x=-Math.PI/2;G.add(floor);
+  const wallMats=[0,1,2,3].map(()=>new THREE.MeshBasicMaterial({map:null}));
+  const W=7,H=5.6;
+  [[0,-W,0],[W,0,-Math.PI/2],[0,W,Math.PI],[-W,0,Math.PI/2]].forEach(([x,z,ry],i)=>{const m=new THREE.Mesh(new THREE.PlaneGeometry(2*W,H),wallMats[i]);m.position.set(x,H/2,z);m.rotation.y=ry;G.add(m);});
+  const ceilMat=new THREE.MeshBasicMaterial({color:0x17181b}),ceil=new THREE.Mesh(new THREE.PlaneGeometry(2*W,2*W),ceilMat);ceil.rotation.x=Math.PI/2;ceil.position.y=H;G.add(ceil);
+  const px=m=>(m+8)*64;
+  function floorTex(T){return canvasTex(1024,1024,(g,w,h)=>{
+    g.fillStyle=T.floor;g.fillRect(0,0,w,h);const r=rnd(7);
+    for(let i=0;i<280;i++){const x=r()*w,y=r()*h,rad=26+r()*130,a=.03+r()*.045,c=r()<.5?'255,255,255':'0,0,0',gr=g.createRadialGradient(x,y,0,x,y,rad);gr.addColorStop(0,`rgba(${c},${a})`);gr.addColorStop(1,`rgba(${c},0)`);g.fillStyle=gr;g.fillRect(x-rad,y-rad,rad*2,rad*2);}
+    g.strokeStyle='rgba(0,0,0,.38)';g.lineWidth=1.4;for(let m=-8;m<=8;m+=2){g.beginPath();g.moveTo(px(m),0);g.lineTo(px(m),h);g.stroke();g.beginPath();g.moveTo(0,px(m));g.lineTo(w,px(m));g.stroke();}
+    let p=g.createRadialGradient(px(0),px(.2),0,px(0),px(.2),330);p.addColorStop(0,'rgba(255,255,255,.26)');p.addColorStop(.6,'rgba(255,255,255,.07)');p.addColorStop(1,'rgba(255,255,255,0)');g.fillStyle=p;g.fillRect(0,0,w,h);
+    // 背景紙在拋光地面上的倒影（越靠近紙越亮）
+    const q=g.createLinearGradient(0,px(-2.3),0,px(1.2));const pc=new THREE.Color(T.paper);const rgb=`${pc.r*255|0},${pc.g*255|0},${pc.b*255|0}`;q.addColorStop(0,`rgba(${rgb},.5)`);q.addColorStop(.5,`rgba(${rgb},.12)`);q.addColorStop(1,`rgba(${rgb},0)`);g.fillStyle=q;g.fillRect(px(-1.7),px(-2.3),px(1.7)-px(-1.7),px(1.2)-px(-2.3));
+    // 燈具倒影（朝觀看方向拉長的白色光斑）
+    for(const [x,z,s] of [[-2.6,1.6,1],[2.8,1.2,.8],[-2.6,-1.3,.5],[2.6,-1.3,.5],[3.4,-.2,.5],[-3.8,0,.6]]){g.save();g.translate(px(x),px(z));g.scale(.55*s,2.6*s);const gr=g.createRadialGradient(0,0,0,0,0,34);gr.addColorStop(0,'rgba(255,255,255,.38)');gr.addColorStop(1,'rgba(255,255,255,0)');g.fillStyle=gr;g.fillRect(-34,-34,68,68);g.restore();}
+    p=g.createRadialGradient(w/2,h/2,w*.18,w/2,h/2,w*.72);p.addColorStop(0,'rgba(0,0,0,0)');p.addColorStop(1,'rgba(0,0,0,.6)');g.fillStyle=p;g.fillRect(0,0,w,h);});}
+  function wallTex(T,back){return canvasTex(1120,448,(g,w,h)=>{const mx=m=>(m+W)*w/(2*W),my=m=>h-m*h/H;
+    const gr=g.createLinearGradient(0,0,0,h);gr.addColorStop(0,'#0c0d0f');gr.addColorStop(.35,T.wall);gr.addColorStop(1,T.wall);g.fillStyle=gr;g.fillRect(0,0,w,h);
+    if(back){const p=g.createRadialGradient(w/2,my(1.9),0,w/2,my(1.9),420);p.addColorStop(0,'rgba(255,255,255,.2)');p.addColorStop(1,'rgba(255,255,255,0)');g.fillStyle=p;g.fillRect(0,0,w,h);}
+    const xs=back?[-6.4,-5.2,-4,4,5.2,6.4]:[-5.9,-4.6,-3.3,-2,-.7,.6,1.9,3.2,4.5,5.8];
+    for(const x of xs){const x0=mx(x-.55),x1=mx(x+.55),y0=my(3.3),y1=my(.9);g.fillStyle='rgba(0,0,0,.34)';g.fillRect(x0,y0,x1-x0,y1-y0);g.strokeStyle='rgba(255,255,255,.10)';g.lineWidth=2;g.strokeRect(x0+1,y0+1,x1-x0-2,y1-y0-2);}
+    g.fillStyle='#101114';g.fillRect(0,my(.16),w,my(0)-my(.16));g.fillStyle='rgba(255,255,255,.12)';g.fillRect(0,my(.16),w,2);
+    const v=g.createRadialGradient(w/2,h*.6,w*.15,w/2,h*.6,w*.7);v.addColorStop(0,'rgba(0,0,0,0)');v.addColorStop(1,'rgba(0,0,0,.45)');g.fillStyle=v;g.fillRect(0,0,w,h);});}
+  // ---- 背景紙（cyc）：從橫桿垂下、在地面彎出一道弧，再鋪到前方
+  const paperMat=M(0x6c717a,.95,0,{side:THREE.DoubleSide});
+  {const pts=[],R=.85,z0=-2.35,top=3.0,len=1.5;pts.push([top,z0]);pts.push([R,z0]);for(let i=1;i<=14;i++){const a=i/14*Math.PI/2;pts.push([R-R*Math.sin(a),z0+R-R*Math.cos(a)]);}pts.push([0,len]);
+    const pos=[],idx=[],hw=1.7;pts.forEach(([y,z],i)=>{const yy=y===0?.004:y;pos.push(-hw,yy,z,hw,yy,z);if(i){const a=(i-1)*2;idx.push(a,a+1,a+3,a,a+3,a+2);}});
+    const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));geo.setIndex(idx);geo.computeVertexNormals();G.add(new THREE.Mesh(geo,paperMat));}
+  // 背景架：兩支立柱＋橫桿＋紙捲＋底座
+  for(const sx of[-1.95,1.95]){G.add(cyl([sx,.05,-2.45],[sx,3.2,-2.45],.022,steel));G.add(box(.1,.04,1.1,steel,sx,.03,-2.45));G.add(box(.3,.12,.16,dark,sx,.1,-2.15));}
+  G.add(cyl([-1.95,3.15,-2.45],[1.95,3.15,-2.45],.02,metal));
+  const roll=new THREE.Mesh(new THREE.CylinderGeometry(.075,.075,3.45,16),paperMat);roll.rotation.z=Math.PI/2;roll.position.set(0,3.08,-2.43);G.add(roll);
+  // ---- 燈架與燈具
+  const soft=()=>new THREE.MeshBasicMaterial({color:0xffffff});
+  function stand(x,z,top){const g=new THREE.Group();g.position.set(x,0,z);g.add(cyl([0,.4,0],[0,top,0],.017,metal));g.add(cyl([0,.55,0],[0,.9,0],.024,steel));
+    for(let i=0;i<3;i++){const a=i*2.094+.4;g.add(cyl([0,.42,0],[Math.sin(a)*.55,.02,Math.cos(a)*.55],.011,metal));g.add(box(.05,.03,.05,dark,Math.sin(a)*.55,.015,Math.cos(a)*.55));}
+    g.add(box(.3,.1,.15,dark,Math.sin(.4)*.28,.07,Math.cos(.4)*.28));return g;}
+  function rectBox(w,h,d,bw,bh){const g=new THREE.Group(),geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute([-bw/2,-bh/2,-d,bw/2,-bh/2,-d,bw/2,bh/2,-d,-bw/2,bh/2,-d,-w/2,-h/2,0,w/2,-h/2,0,w/2,h/2,0,-w/2,h/2,0],3));geo.setIndex([0,1,5,0,5,4,1,2,6,1,6,5,2,3,7,2,7,6,3,0,4,3,4,7]);geo.computeVertexNormals();
+    g.add(new THREE.Mesh(geo,M(0x17181b,.85,.05,{side:THREE.DoubleSide})));const f=new THREE.Mesh(new THREE.PlaneGeometry(w*.97,h*.97),soft());f.position.z=.004;g.add(f);boxes.push(f);
+    const head=new THREE.Mesh(new THREE.CylinderGeometry(.09,.09,.22,12),dark);head.rotation.x=Math.PI/2;head.position.z=-d-.08;g.add(head);return g;}
+  function octa(r,d){const g=new THREE.Group(),b=new THREE.Mesh(new THREE.CylinderGeometry(r,r*.2,d,8,1,true),M(0x17181b,.85,.05,{side:THREE.DoubleSide}));b.rotation.x=Math.PI/2;b.position.z=-d/2;g.add(b);
+    const f=new THREE.Mesh(new THREE.CircleGeometry(r*.97,8),soft());f.position.z=.004;g.add(f);boxes.push(f);const head=new THREE.Mesh(new THREE.CylinderGeometry(.09,.09,.22,12),dark);head.rotation.x=Math.PI/2;head.position.z=-d-.06;g.add(head);return g;}
+  function dish(r){const g=new THREE.Group(),pr=[[0,0],[r*.18,0],[r*.6,.06],[r*.9,.15],[r,.19]].map(([x,y])=>new THREE.Vector2(x,y));const b=new THREE.Mesh(new THREE.LatheGeometry(pr,24),M(0xd5d8de,.35,.3,{side:THREE.DoubleSide}));b.rotation.x=Math.PI/2;b.position.z=-.19;g.add(b);
+    const c=new THREE.Mesh(new THREE.SphereGeometry(r*.17,12,8,0,Math.PI*2,0,Math.PI/2),M(0xc9ccd2,.3,.4));c.rotation.x=Math.PI/2;c.position.z=-.12;g.add(c);const head=new THREE.Mesh(new THREE.CylinderGeometry(.08,.08,.24,12),dark);head.rotation.x=Math.PI/2;head.position.z=-.3;g.add(head);return g;}
+  function umbrella(r){const g=new THREE.Group(),u=new THREE.Mesh(new THREE.ConeGeometry(r,.32,18,1,true),M(0xf3f4f7,.9,0,{side:THREE.DoubleSide,emissive:0x8a8d95,emissiveIntensity:.35}));u.rotation.x=-Math.PI/2;u.position.z=-.16;g.add(u);g.add(cyl([0,0,-.32],[0,0,.1],.008,metal));g.add(box(.08,.12,.1,dark,0,0,-.4));return g;}
+  const L=(g,x,y,z)=>{g.position.set(x,y,z);facing(g,x,z);G.add(g);};
+  // 左前：大型柔光箱（主光）
+  {G.add(stand(-2.6,1.6,1.85));const k=rectBox(1.0,1.4,.55,.28,.38);L(k,-2.6,1.95,1.6);k.rotation.x=.12;}
+  // 右前：八角罩
+  {G.add(stand(2.8,1.2,1.7));L(octa(.5,.5),2.8,1.8,1.2);}
+  // 左後／右後：長條柔光箱（輪廓光）
+  for(const sx of[-1,1]){G.add(stand(sx*2.6,-1.3,1.7));L(rectBox(.3,1.7,.4,.12,.3),sx*2.6,1.75,-1.3);}
+  // 右側：雷達罩；左側：反射傘
+  {G.add(stand(3.4,-.2,1.55));L(dish(.3),3.4,1.6,-.2);G.add(stand(-3.8,0,1.5));L(umbrella(.55),-3.8,1.65,0);}
+  // C 型燈架＋懸臂：頭頂髮光
+  {const cs=new THREE.Group();cs.position.set(1.3,0,-1.5);cs.add(cyl([0,.4,0],[0,2.7,0],.03,steel));for(let i=0;i<3;i++){const a=i*2.094+.8;cs.add(cyl([0,.45,0],[Math.sin(a)*.65,.03,Math.cos(a)*.65],.014,metal));}
+    cs.add(cyl([.55,2.7,0],[-1.15,2.72,.12],.022,metal));cs.add(box(.05,.05,.05,dark,0,2.7,0));cs.add(box(.34,.3,.16,dark,.55,2.78,0));cs.add(box(.34,.1,.16,M(0x2c2e33,.6,.3),.58,2.62,0));
+    const hl=octa(.32,.32);hl.rotation.x=Math.PI/2;hl.position.set(-1.15,2.6,.12);cs.add(hl);cs.add(box(.1,.1,.1,dark,-1.15,2.72,.12));G.add(cs);}
+  // V-flat（黑白各一）、蘋果箱、圓凳
+  {const vf=new THREE.Group();vf.position.set(4.3,0,2.3);facing(vf,4.3,2.3);const a=box(.7,1.9,.03,M(0xeceef2,.9,0),-.28,.95,0),b=box(.7,1.9,.03,M(0x101114,.9,0),.28,.95,0);a.rotation.y=.62;b.rotation.y=-.62;vf.add(a,b);G.add(vf);}
+  {G.add(box(.6,.2,.4,wood,-3.2,.1,2.6),box(.5,.1,.34,wood,-3.18,.25,2.6),box(.4,.2,.3,wood,-3.17,.4,2.6));
+   const st=new THREE.Group();st.position.set(-2.4,0,2.9);const seat=new THREE.Mesh(new THREE.CylinderGeometry(.19,.19,.05,20),M(0x1b1c20,.8,.1));seat.position.y=.66;st.add(seat);for(let i=0;i<3;i++){const a=i*2.094;st.add(cyl([Math.sin(a)*.05,.64,Math.cos(a)*.05],[Math.sin(a)*.3,0,Math.cos(a)*.3],.014,metal));}G.add(st);}
+  // 連線桌：筆電＋螢幕（左後）
+  {const t=new THREE.Group();t.position.set(-5.2,0,-1.2);t.rotation.y=Math.PI/2.4;t.add(box(1.3,.04,.65,M(0x2a2c31,.6,.2),0,.76,0));for(const[x,z]of[[-.6,-.28],[.6,-.28],[-.6,.28],[.6,.28]])t.add(cyl([x,0,z],[x,.76,z],.022,steel));
+    t.add(box(.36,.02,.25,M(0x888d96,.4,.6),-.3,.8,.05));const sc=box(.36,.23,.012,dark,-.3,.92,-.07);sc.rotation.x=-.25;t.add(sc);const sf=new THREE.Mesh(new THREE.PlaneGeometry(.33,.2),new THREE.MeshBasicMaterial({color:0x9db4d4}));sf.position.set(-.3,.92,-.062);sf.rotation.x=-.25;t.add(sf);
+    t.add(box(.82,.5,.03,dark,.35,1.2,-.1));const mf=new THREE.Mesh(new THREE.PlaneGeometry(.78,.46),new THREE.MeshBasicMaterial({color:0xaab6cc}));mf.position.set(.35,1.2,-.083);t.add(mf);t.add(cyl([.35,.78,-.1],[.35,.95,-.1],.02,steel));G.add(t);}
+  // 背景紙捲架（靠後牆）
+  {G.add(box(2.2,.06,.3,steel,4.7,.2,-6.75),box(2.2,.06,.3,steel,4.7,2.7,-6.75));['#e0e2e8','#202126','#5e636c','#dc9fb7','#7399d0'].forEach((c,i)=>{const r=new THREE.Mesh(new THREE.CylinderGeometry(.1,.1,2.5,14),M(c,.95,0));r.position.set(3.9+i*.4,1.45,-6.75);G.add(r);});}
+  // 天花板：軌道燈、橫樑、外露管線
+  for(const rz of[-1.8,1.6]){G.add(box(11,.05,.09,steel,0,5.0,rz));for(let i=0;i<7;i++){const x=-4.5+i*1.5,s=new THREE.Group();s.position.set(x,4.92,rz);s.lookAt(new V3(0,1.2,0));const can=new THREE.Mesh(new THREE.CylinderGeometry(.065,.075,.22,12),dark);can.rotation.x=Math.PI/2;can.position.z=.1;s.add(can);const lens=new THREE.Mesh(new THREE.CircleGeometry(.06,12),new THREE.MeshBasicMaterial({color:0xfff3d8}));lens.position.z=.21;s.add(lens);
+      const cone=new THREE.Mesh(new THREE.ConeGeometry(.7,3.6,20,1,true),new THREE.MeshBasicMaterial({color:0xfff0d0,transparent:true,opacity:.011,blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide}));cone.rotation.x=-Math.PI/2;cone.position.z=1.9;s.add(cone);G.add(s);}}
+  for(const bz of[-4.5,0,4.5])G.add(box(2*W,.3,.16,M(0x0f1012,.9,.1),0,H-.15,bz));
+  G.add(cyl([-W,5.3,-5.6],[W,5.3,-5.6],.07,M(0x24262b,.5,.5)),cyl([-W,5.05,-5.9],[W,5.05,-5.9],.045,M(0x3a3d44,.5,.5)));
+  // 地面：電線、站位膠帶
+  const cable=pts=>new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts.map(p=>new V3(p[0],.012,p[1]))),40,.009,6),M(0x0c0c0e,.7,.1));
+  G.add(cable([[-2.6,1.6],[-3,.4],[-4.2,-1.5],[-5.5,-4],[-6.9,-6]]),cable([[2.8,1.2],[3.6,-.4],[4.8,-2.6],[6.2,-4.5],[6.9,-5]]),cable([[3.4,-.2],[4,-1.4],[5,-3],[6,-4.4]]));
+  const tape=(c,x,z,rot,len=.3)=>{const g=new THREE.Group();g.position.set(x,.006,z);g.rotation.y=rot;const m=new THREE.MeshBasicMaterial({color:c});for(const r of[0,Math.PI/2]){const b=new THREE.Mesh(new THREE.PlaneGeometry(len,.035),m);b.rotation.x=-Math.PI/2;b.rotation.z=r;g.add(b);}return g;};
+  G.add(tape(0xf2d24a,-.62,.12,.4),tape(0xf2d24a,.62,.12,-.4),tape(0xeceef2,0,1.05,0,.22));
+  // 站姿接觸陰影
+  const shTex=radialTex('rgba(0,0,0,0.6)','rgba(0,0,0,0)');
+  const shadow=new THREE.Mesh(new THREE.PlaneGeometry(1.5,1.0),new THREE.MeshBasicMaterial({map:shTex,transparent:true,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2}));shadow.rotation.x=-Math.PI/2;shadow.position.y=.009;G.add(shadow);
+  const shadow2=new THREE.Mesh(new THREE.PlaneGeometry(4,3),new THREE.MeshBasicMaterial({map:shTex,transparent:true,opacity:.28,depthWrite:false}));shadow2.rotation.x=-Math.PI/2;shadow2.position.y=.008;G.add(shadow2);
   S.apply=T=>{
-    S.paintBg([[0,T.bg[0]],[0.55,T.bg[1]],[1,T.bg[1]]]);
-    floorMat.map.dispose();floorMat.map=radialTex(T.bg[0],T.bg[1],256);floorMat.map.needsUpdate=true;floorMat.needsUpdate=true;
-    boxes.forEach(m=>m.material.color.set(T.soft));
+    S.paintBg([[0,T.ceil],[1,T.wall]]);
+    if(floorMat.map)floorMat.map.dispose();floorMat.map=floorTex(T);floorMat.needsUpdate=true;
+    wallMats.forEach((m,i)=>{if(m.map)m.map.dispose();m.map=wallTex(T,i===0);m.needsUpdate=true;});
+    ceilMat.color.set(T.ceil);paperMat.color.set(T.paper);boxes.forEach(m=>m.material.color.set(T.soft));
   };
-  S.update=t=>{};S.apply(TH.white);return S;
+  S.update=t=>{};S.apply(TH.gray);return S;
 }
 // ======================================================================= 2. 櫻花庭園
 function createSakura(scene){
