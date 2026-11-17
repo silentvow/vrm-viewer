@@ -45,7 +45,7 @@ body.nosd #side{display:none}
 #sidebtn:hover,#sidebtn:focus-visible{opacity:1}
 </style>
 <div id="side">
-  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.8.1</span></h1>
+  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.8.2</span></h1>
   <div class="sub">在瀏覽器裡檢視 VRM 模型、播放 VRMA 動作、擺姿勢、調表情、換背景、配音樂。檔案只在你的瀏覽器內讀取，不會上傳。</div>
 
 
@@ -90,7 +90,7 @@ body.nosd #side{display:none}
 
   <h2>畫面</h2>
   <div class="row"><label class="chk"><input type="checkbox" id="grid" checked>地板格線</label><label class="chk"><input type="checkbox" id="skel">骨架</label><label class="chk"><input type="checkbox" id="wire">線框</label></div>
-  <div class="row"><label class="chk"><input type="checkbox" id="handTrail">手部拖尾特效（雙色光帶＋星芒＋音符，仿 MateEngine 舞蹈）</label></div>
+  <div class="row"><label class="chk"><input type="checkbox" id="handTrail">手部拖尾特效</label></div>
   <div class="row"><label class="chk"><input type="checkbox" id="rot">自動旋轉</label><span class="grow"></span><span class="sub">背景</span>
     <select id="bg"><option value="#2b2e36">深灰</option><option value="#8f95a3">中灰</option><option value="#f2f2f2">白</option><option value="#00b140">綠幕</option><option value="#101216">黑</option><option value="stage">演唱會舞台</option><option value="studio">攝影棚</option><option value="sakura">櫻花庭園</option><option value="cyber">賽博雨夜</option><option value="aurora">星空極光</option></select></div>
   <div class="row" id="stageRow" style="display:none"><span class="sub">背景配色</span><select id="stageTheme"><option value="pinkblue">粉藍</option><option value="redgold">紅金</option><option value="purplegreen">紫綠</option></select><label class="chk"><input type="checkbox" id="stageLight" checked>場景光色（彩色逆光）</label></div>
@@ -671,7 +671,7 @@ const CFG={scale:4.4,dotScale:1.0,maxPts:90,minStep:0.003,teleport:0.6,maxDots:5
   // 光帶：life 壽命(s)、width 寬度（實機單位，×scale）、taper 尾端收尖、
   // grad：[u,r,g,b,a]（u=0 頭端→1 尾端；取自實機漸層）
   ribbons:[
-    {layer:'outer',life:0.70,width:0.06,scale:1.9,taper:false,gain:2.0,sigma:0.26,
+    {layer:'outer',life:0.70,width:0.06,scale:1.9,taper:false,gain:2.6,sigma:0.5,pw:3.0,
      grad:[[0,.245,.634,1,0],[.0236,.30,.70,1,.39],[.2,.475,.942,1,.34],[.446,.33,1,.76,.235],[.674,.236,1,.42,.10],[1,.236,1,.42,0]]},
     {layer:'inner',life:0.80,width:0.03,scale:2.0,taper:true,gain:2.2,sigma:0.20,
      grad:[[0,.245,.634,1,0],[.022,.30,.70,1,.39],[.2,.475,.942,1,.36],[.762,.665,.235,1,.31],[.803,.665,.235,1,.24],[1,.665,.235,1,0]]}],
@@ -691,11 +691,11 @@ function lerpKeys(G,u,out){
 function curve(C,t){for(let i=1;i<C.length;i++){if(t<=C[i][0]){const a=C[i-1],b=C[i],k=(t-a[0])/(b[0]-a[0]||1);return a[1]+(b[1]-a[1])*k;}}return C[C.length-1][1];}
 const RIBBON_VS=`attribute vec4 aCol;attribute float aLen;varying vec4 vCol;varying vec2 vUv;varying float vLen;void main(){vCol=aCol;vUv=uv;vLen=aLen;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`;
 // 貼圖近似：中央一條略為擺動的細亮線（寬約帶寬 16%）；顏色＝漸層×HDR 倍率，過曝後以 1-exp 壓縮 → 白芯＋顏色邊（等同實機的過曝／泛光）
-const RIBBON_FS=`uniform vec3 uTint;uniform float uGain;uniform float uTile;uniform float uSigma;varying vec4 vCol;varying vec2 vUv;varying float vLen;
+const RIBBON_FS=`uniform vec3 uTint;uniform float uGain;uniform float uTile;uniform float uSigma;uniform float uPw;varying vec4 vCol;varying vec2 vUv;varying float vLen;
 void main(){
   float v=vUv.x;float L=vLen*uTile;
   float c=0.5+0.03*sin(L*6.283+1.3)+0.015*sin(L*6.283*3.3);
-  float d=(v-c)/uSigma;float line=exp(-d*d*2.4);
+  float d=(v-c)/uSigma;float line=exp(-2.4*pow(abs(d),uPw));
   float dh=(v-0.5)/0.45;line+=0.05*exp(-dh*dh*3.0);
   vec3 x=vCol.rgb*uTint*(vCol.a*line*uGain);
   x=mix(x,vec3((x.r+x.g+x.b)/3.0),0.2);   // 偏向白，讓顏色更淡（實機為淡青白＋粉邊）
@@ -748,7 +748,7 @@ function createHandTrail(scene){
     g.setAttribute('aLen',new THREE.BufferAttribute(len,1).setUsage(THREE.DynamicDrawUsage));
     g.setAttribute('uv',new THREE.BufferAttribute(uv,2));g.setIndex(new THREE.BufferAttribute(idx,1));g.setDrawRange(0,0);
     const m=new THREE.ShaderMaterial({vertexShader:RIBBON_VS,fragmentShader:RIBBON_FS,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide,
-      uniforms:{uTint:{value:new THREE.Vector3(...tint)},uGain:{value:R.gain},uTile:{value:1.0/(R.scale||CFG.scale)},uSigma:{value:R.sigma}}});
+      uniforms:{uTint:{value:new THREE.Vector3(...tint)},uGain:{value:R.gain},uTile:{value:1.0/(R.scale||CFG.scale)},uSigma:{value:R.sigma},uPw:{value:R.pw||2.0}}});
     const mesh=new THREE.Mesh(g,m);mesh.frustumCulled=false;mesh.renderOrder=10;mesh.userData.R=R;group.add(mesh);return mesh;
   }
   const maxLife=Math.max(...CFG.ribbons.map(r=>r.life));
@@ -794,6 +794,11 @@ function createHandTrail(scene){
         }
       }
       DX[n]=SX[cnt-1];DY[n]=SY[cnt-1];DZ[n]=SZ[cnt-1];DA[n]=SA[cnt-1];DV[n]=SV[cnt-1];n++;
+      // 中心線低通：手部路徑在相鄰取樣間偶有近 90° 的急折，寬帶沿它偏移會留下尖折。對內部點做 [1,2,1]/4 平滑數次（兩端固定，頭端仍接在手上）
+      for(let pass=0;pass<(R.smooth||12);pass++){
+        let px=DX[0],py=DY[0],pz=DZ[0];
+        for(let k=1;k<n-1;k++){const cx=DX[k],cy=DY[k],cz=DZ[k];DX[k]=(px+2*cx+DX[k+1])/4;DY[k]=(py+2*cy+DY[k+1])/4;DZ[k]=(pz+2*cz+DZ[k+1])/4;px=cx;py=cy;pz=cz;}
+      }
       const pa=m.geometry.attributes.position.array,ca=m.geometry.attributes.aCol.array,la=m.geometry.attributes.aLen.array;
       // 累積弧長（頭端=0）。切線取「±TW 弧長」的視窗，頭端點距很近時方向也穩定（避免每個頂點方向亂跳而炸成尖刺）
       CUM[0]=0;for(let k=1;k<n;k++)CUM[k]=CUM[k-1]+Math.hypot(DX[k]-DX[k-1],DY[k]-DY[k-1],DZ[k]-DZ[k-1]);
@@ -817,15 +822,32 @@ function createHandTrail(scene){
         // 方向連續：路徑折返（尖點）時 cross(tan,view) 會反號，帶子會扭成蝴蝶結而「被切掉一半」；與前一頂點同向即可保持完整寬度
         if(k>0&&side.dot(prevSide)<0)side.negate();
         prevSide.copy(side);
-        const e=Math.min(CUM[k],total-CUM[k])/CFG.capLen;const cap=e>=1?1:(e<=0?0:e*e*(3-2*e));
+        const capL=Math.max(CFG.capLen,R.width*(R.scale||CFG.scale)*0.5);const e=Math.min(CUM[k],total-CUM[k])/capL;const cap=e>=1?1:(e<=0?0:Math.sqrt(1-(1-e)*(1-e)));   // 圓弧端（寬緞帶的圓頭，不是尖角）
         let w=R.width*(R.scale||CFG.scale)*0.5*(R.taper?(1-u):1)*cap;
         w=Math.min(w,RAD[k]*CFG.curveK);
         WD[k]=w;SXs[k]=side.x;SYs[k]=side.y;SZs[k]=side.z;
       }
       // 寬度做一次三點平滑，避免相鄰頂點寬度突變
       for(let k=0;k<n;k++){const wa=WD[Math.max(0,k-1)],wb=WD[Math.min(n-1,k+1)];WS[k]=(wa+2*WD[k]+wb)/4;}
+      // 把「方向×寬度」合成偏移向量並平滑：急彎處方向快速轉動，平滑後邊緣自然圓順收窄，不會留下單點尖折
+      for(let k=0;k<n;k++){SXs[k]*=WS[k];SYs[k]*=WS[k];SZs[k]*=WS[k];WS[k]=1;}
+      for(let pass=0;pass<4;pass++){
+        let px=SXs[0],py=SYs[0],pz=SZs[0];
+        for(let k=1;k<n-1;k++){const cx=SXs[k],cy=SYs[k],cz=SZs[k];SXs[k]=(px+2*cx+SXs[k+1])/4;SYs[k]=(py+2*cy+SYs[k+1])/4;SZs[k]=(pz+2*cz+SZs[k+1])/4;px=cx;py=cy;pz=cz;}
+      }
+      // 折疊檢查：彎道內側的邊若相對中心線反向前進（半徑小於帶寬）就會翻折成尖刺 → 迭代縮窄該處寬度直到兩側邊都保持前進
+      for(let pass=0;pass<8;pass++){
+        let ch=false;
+        for(let k=1;k<n;k++){
+          const cx=DX[k]-DX[k-1],cy=DY[k]-DY[k-1],cz=DZ[k]-DZ[k-1],c2=cx*cx+cy*cy+cz*cz;
+          const dx=SXs[k]*WS[k]-SXs[k-1]*WS[k-1],dy=SYs[k]*WS[k]-SYs[k-1]*WS[k-1],dz=SZs[k]*WS[k]-SZs[k-1]*WS[k-1];
+          const dd=cx*dx+cy*dy+cz*dz;
+          if(Math.abs(dd)>0.6*c2){const f=0.6*c2/Math.abs(dd);{const g=Math.max(0.5,f);SXs[k]*=g;SYs[k]*=g;SZs[k]*=g;SXs[k-1]*=g;SYs[k-1]*=g;SZs[k-1]*=g;}ch=true;}
+        }
+        if(!ch)break;
+      }
       for(let k=0;k<n;k++){
-        const u=Math.min(1,DA[k]/R.life),w=WS[k];
+        const u=Math.min(1,DA[k]/R.life),w=1;
         const o=k*6;pa[o]=DX[k]-SXs[k]*w;pa[o+1]=DY[k]-SYs[k]*w;pa[o+2]=DZ[k]-SZs[k]*w;pa[o+3]=DX[k]+SXs[k]*w;pa[o+4]=DY[k]+SYs[k]*w;pa[o+5]=DZ[k]+SZs[k]*w;
         la[k*2]=la[k*2+1]=CUM[k];
         lerpKeys(R.grad,u,col4);col4[3]*=DV[k];const c=k*8;for(let j=0;j<4;j++){ca[c+j]=col4[j];ca[c+4+j]=col4[j];}
@@ -1592,6 +1614,6 @@ if($('pickOn')){(function(){
   $('seamRun').onclick=()=>{seamScan().catch(e=>{$('seamOut').textContent='錯誤：'+e.message;});};
   $('meshRefresh').onclick=listMeshes;
 })();}
-window.__vmdAt=(t)=>{if(!vmdPlay)return 0;vmdPlay.t=t;stepVmd(0);vrm.update(0.001);return vmdPlay.dur;};window.__VERSION=($('ver')||{}).textContent;window.__ALL_POSES=ALL_POSES;window.__startPose=startPose;window.__loadVRMA=(...x)=>loadVRMA(...x);window.__FILES=()=>FILES;window.__step=(dt)=>{if(!vrm)return;if(mixer&&action)mixer.update(dt);exprTick(dt);vrm.update(dt);};window.__render=()=>{ctl.update();renderer.render(scene,cam);};window.__finishPose=()=>{if(poseK&&poseM)applyPoseK(vrm,poseK.comp,poseM,1);vrm.update(0.001);};window.__vrmGet=()=>vrm;window.__mx=()=>({mixer,action,clip});
+window.__vmdAt=(t)=>{if(!vmdPlay)return 0;vmdPlay.t=t;stepVmd(0);vrm.update(0.001);return vmdPlay.dur;};window.__VERSION=($('ver')||{}).textContent;window.__ALL_POSES=ALL_POSES;window.__startPose=startPose;window.__loadVRMA=(...x)=>loadVRMA(...x);window.__FILES=()=>FILES;window.__step=(dt)=>{if(!vrm)return;if(mixer&&action)mixer.update(dt);exprTick(dt);vrm.update(dt);};window.__render=()=>{ctl.update();renderer.render(scene,cam);};window.__finishPose=()=>{if(poseK&&poseM)applyPoseK(vrm,poseK.comp,poseM,1);vrm.update(0.001);};window.__cam=()=>cam;window.__vrmGet=()=>vrm;window.__mx=()=>({mixer,action,clip});
 tick();
 </script>
