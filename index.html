@@ -45,7 +45,7 @@ body.nosd #side{display:none}
 #sidebtn:hover,#sidebtn:focus-visible{opacity:1}
 </style>
 <div id="side">
-  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.8.0</span></h1>
+  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.8.1</span></h1>
   <div class="sub">在瀏覽器裡檢視 VRM 模型、播放 VRMA 動作、擺姿勢、調表情、換背景、配音樂。檔案只在你的瀏覽器內讀取，不會上傳。</div>
 
 
@@ -666,20 +666,21 @@ const {createHandTrail}=(()=>{
 const SUB=12;   // 光帶點列以 Catmull-Rom 細分（低幀率時讓弧線平滑）
 const CFG={scale:4.4,dotScale:1.0,maxPts:90,minStep:0.003,teleport:0.6,maxDots:500,
   // 光帶出現門檻：手速（m/s）超過 startSpeed 才開始拉出光帶；速度掉回門檻以下後，再持續 hold 秒才停止延伸（停滯寬限）
-  startSpeed:1.0,stopRatio:0.6,hold:0.25,speedTau:0.08,attack:0.06,release:0.15,
+  tangentWindow:0.04,capLen:0.05,minSpacing:0.012,curveK:0.9,
+  startSpeed:1.0,stopRatio:0.6,hold:0.25,speedTau:0.08,attack:0.06,detach:0.12,
   // 光帶：life 壽命(s)、width 寬度（實機單位，×scale）、taper 尾端收尖、
   // grad：[u,r,g,b,a]（u=0 頭端→1 尾端；取自實機漸層）
   ribbons:[
-    {life:0.25,width:0.06,taper:false,gain:4.0,
+    {layer:'outer',life:0.70,width:0.06,scale:1.9,taper:false,gain:2.0,sigma:0.26,
      grad:[[0,.245,.634,1,0],[.0236,.30,.70,1,.39],[.2,.475,.942,1,.34],[.446,.33,1,.76,.235],[.674,.236,1,.42,.10],[1,.236,1,.42,0]]},
-    {life:0.80,width:0.03,taper:true,gain:4.0,
+    {layer:'inner',life:0.80,width:0.03,scale:2.0,taper:true,gain:2.2,sigma:0.20,
      grad:[[0,.245,.634,1,0],[.022,.30,.70,1,.39],[.2,.475,.942,1,.36],[.762,.665,.235,1,.31],[.803,.665,.235,1,.24],[1,.665,.235,1,0]]}],
   // 每隻手各光帶的 HDR 顏色倍率（實機材質 _Main_Color）。left＝Trail 1（洋紅），right＝Trail 2（青藍）
   tint:{leftHand:[[0.89,1.23,3.0],[57.0,8.1,68.6]],rightHand:[[0.89,1.23,3.0],[2.87,7.19,32.0]]},
   // 粒子：rate 每單位距離發射數、life 壽命、size 邊長、radius 發射球半徑、sizeCurve [[t,v]…]、col [[t,r,g,b,a]…]（取自實機）
-  dots:[{kind:0,rate:4,life:0.6,size:0.13,radius:0.05,sizeCurve:[[0,0],[.18,.96],[1,0]],gain:2.0,
+  dots:[{kind:0,rate:3,life:0.6,size:0.08,radius:0.05,sizeCurve:[[0,0],[.18,.96],[1,0]],gain:1.6,
          col:[[0,.198,.758,1,0],[.0625,.198,.758,1,1],[.837,.538,.34,1,.2],[1,.538,.34,1,0]]},
-        {kind:1,rate:3,life:0.7,size:0.24,radius:0.03,sizeCurve:[[0,.33],[.7,1],[1,.6]],gain:3.0,
+        {kind:1,rate:3,life:0.7,size:0.24,radius:0.03,sizeCurve:[[0,.33],[.7,1],[1,.6]],gain:8.0,
          col:[[0,0,.77,1,0],[.12,0,.77,1,1],[.78,.464,.18,1,.6],[1,.464,.18,1,0]]}]};
 function lerpKeys(G,u,out){
   for(let i=1;i<G.length;i++){
@@ -690,14 +691,14 @@ function lerpKeys(G,u,out){
 function curve(C,t){for(let i=1;i<C.length;i++){if(t<=C[i][0]){const a=C[i-1],b=C[i],k=(t-a[0])/(b[0]-a[0]||1);return a[1]+(b[1]-a[1])*k;}}return C[C.length-1][1];}
 const RIBBON_VS=`attribute vec4 aCol;attribute float aLen;varying vec4 vCol;varying vec2 vUv;varying float vLen;void main(){vCol=aCol;vUv=uv;vLen=aLen;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`;
 // 貼圖近似：中央一條略為擺動的細亮線（寬約帶寬 16%）；顏色＝漸層×HDR 倍率，過曝後以 1-exp 壓縮 → 白芯＋顏色邊（等同實機的過曝／泛光）
-const RIBBON_FS=`uniform vec3 uTint;uniform float uGain;uniform float uTile;varying vec4 vCol;varying vec2 vUv;varying float vLen;
+const RIBBON_FS=`uniform vec3 uTint;uniform float uGain;uniform float uTile;uniform float uSigma;varying vec4 vCol;varying vec2 vUv;varying float vLen;
 void main(){
   float v=vUv.x;float L=vLen*uTile;
   float c=0.5+0.03*sin(L*6.283+1.3)+0.015*sin(L*6.283*3.3);
-  float d=(v-c)/0.22;float line=exp(-d*d*2.4);
+  float d=(v-c)/uSigma;float line=exp(-d*d*2.4);
   float dh=(v-0.5)/0.45;line+=0.05*exp(-dh*dh*3.0);
   vec3 x=vCol.rgb*uTint*(vCol.a*line*uGain);
-  x=mix(x,vec3((x.r+x.g+x.b)/3.0),0.3);   // 偏向白，讓顏色更淡（實機為淡青白＋粉邊）
+  x=mix(x,vec3((x.r+x.g+x.b)/3.0),0.2);   // 偏向白，讓顏色更淡（實機為淡青白＋粉邊）
   vec3 o=1.0-exp(-x);
   if(max(o.r,max(o.g,o.b))<0.004)discard;
   gl_FragColor=vec4(o,1.0);}`;
@@ -747,7 +748,7 @@ function createHandTrail(scene){
     g.setAttribute('aLen',new THREE.BufferAttribute(len,1).setUsage(THREE.DynamicDrawUsage));
     g.setAttribute('uv',new THREE.BufferAttribute(uv,2));g.setIndex(new THREE.BufferAttribute(idx,1));g.setDrawRange(0,0);
     const m=new THREE.ShaderMaterial({vertexShader:RIBBON_VS,fragmentShader:RIBBON_FS,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide,
-      uniforms:{uTint:{value:new THREE.Vector3(...tint)},uGain:{value:R.gain},uTile:{value:1.0/CFG.scale}}});
+      uniforms:{uTint:{value:new THREE.Vector3(...tint)},uGain:{value:R.gain},uTile:{value:1.0/(R.scale||CFG.scale)},uSigma:{value:R.sigma}}});
     const mesh=new THREE.Mesh(g,m);mesh.frustumCulled=false;mesh.renderOrder=10;mesh.userData.R=R;group.add(mesh);return mesh;
   }
   const maxLife=Math.max(...CFG.ribbons.map(r=>r.life));
@@ -761,17 +762,19 @@ function createHandTrail(scene){
   const dots=new THREE.Points(dg,dmat);dots.frustumCulled=false;dots.renderOrder=11;group.add(dots);
   const dl=[];for(let i=0;i<D;i++)dl.push({age:1,life:1,T:null,baseSize:0});
   let di=0,curVrm=null;
-  const v=new THREE.Vector3(),side=new THREE.Vector3(),view=new THREE.Vector3(),tan=new THREE.Vector3(),pp=new THREE.Vector3(),col4=[0,0,0,0];
+  const v=new THREE.Vector3(),prevSide=new THREE.Vector3(),side=new THREE.Vector3(),view=new THREE.Vector3(),tan=new THREE.Vector3(),pp=new THREE.Vector3(),col4=[0,0,0,0];
   function clear(){for(const h of hands){h.pts.length=0;h.has=false;h.carry=[0,0];h.act=false;h.offT=0;h.vis=0;h.sp=0;for(const m of h.meshes)m.geometry.setDrawRange(0,0);}for(const b of dl)b.age=b.life=1;for(let i=0;i<D;i++){dlife[i]=1;dsize[i]=0;}dg.attributes.aLife.needsUpdate=true;dg.attributes.aSize.needsUpdate=true;}
   // 暫存陣列（避免每幀配置大量物件造成 GC 卡頓）
   const SX=new Float32Array(N),SY=new Float32Array(N),SZ=new Float32Array(N),SA=new Float32Array(N),SV=new Float32Array(N);
   const DX=new Float32Array(N),DY=new Float32Array(N),DZ=new Float32Array(N),DA=new Float32Array(N),DV=new Float32Array(N);
+  const CUM=new Float32Array(N),TX=new Float32Array(N),TY=new Float32Array(N),TZ=new Float32Array(N),RAD=new Float32Array(N),WD=new Float32Array(N),WS=new Float32Array(N),SXs=new Float32Array(N),SYs=new Float32Array(N),SZs=new Float32Array(N);
   const mix=(a,b,k)=>a+(b-a)*k;
   function build(h,cam){
     const P=h.pts;
     for(const m of h.meshes){
       const R=m.userData.R;
       let cnt=0;
+      if(h.has&&P.length){SX[0]=h.last.x;SY[0]=h.last.y;SZ[0]=h.last.z;SA[0]=0;SV[0]=P[P.length-1].vis;cnt=1;}   // live head：永遠接到手的目前位置
       for(let i=P.length-1;i>=0&&cnt<N;i--){const q=P[i];if(q.age>R.life)break;SX[cnt]=q.x;SY[cnt]=q.y;SZ[cnt]=q.z;SA[cnt]=q.age;SV[cnt]=q.vis;cnt++;}   // 0＝頭端（最新）
       if(cnt<2){m.geometry.setDrawRange(0,0);continue;}
       // 向心 Catmull-Rom（Barry-Goldman，純數值運算）：點距不均勻時不會尖角／自交；細分數依段長自適應
@@ -785,19 +788,46 @@ function createHandTrail(scene){
           const t=t1+(t2-t1)*k/sub;
           const f01=(t-t0)/(t1-t0),f12=(t-t1)/(t2-t1),f23=(t-t2)/(t3-t2),f02=(t-t0)/(t2-t0),f13=(t-t1)/(t3-t1);
           const cr=(S)=>{const A1=mix(S[i0],S[i1],f01),A2=mix(S[i1],S[i2],f12),A3=mix(S[i2],S[i3],f23);return mix(mix(A1,A2,f02),mix(A2,A3,f13),f12);};
-          DX[n]=cr(SX);DY[n]=cr(SY);DZ[n]=cr(SZ);DA[n]=mix(SA[i1],SA[i2],k/sub);DV[n]=mix(SV[i1],SV[i2],k/sub);n++;
+          const qx=cr(SX),qy=cr(SY),qz=cr(SZ);
+          if(n>0&&Math.hypot(qx-DX[n-1],qy-DY[n-1],qz-DZ[n-1])<CFG.minSpacing)continue;   // 太近的點（頭端常見）會讓切線亂跳、炸成尖刺：略過
+          DX[n]=qx;DY[n]=qy;DZ[n]=qz;DA[n]=mix(SA[i1],SA[i2],k/sub);DV[n]=mix(SV[i1],SV[i2],k/sub);n++;
         }
       }
       DX[n]=SX[cnt-1];DY[n]=SY[cnt-1];DZ[n]=SZ[cnt-1];DA[n]=SA[cnt-1];DV[n]=SV[cnt-1];n++;
-      const pa=m.geometry.attributes.position.array,ca=m.geometry.attributes.aCol.array,la=m.geometry.attributes.aLen.array;let acc=0;
+      const pa=m.geometry.attributes.position.array,ca=m.geometry.attributes.aCol.array,la=m.geometry.attributes.aLen.array;
+      // 累積弧長（頭端=0）。切線取「±TW 弧長」的視窗，頭端點距很近時方向也穩定（避免每個頂點方向亂跳而炸成尖刺）
+      CUM[0]=0;for(let k=1;k<n;k++)CUM[k]=CUM[k-1]+Math.hypot(DX[k]-DX[k-1],DY[k]-DY[k-1],DZ[k]-DZ[k-1]);
+      const total=CUM[n-1];
+      // 第一遍：每個頂點的切線方向、曲率半徑（用 ±視窗弧長的前後兩段方向夾角估計）
+      for(let k=0;k<n;k++){
+        let ka=k;while(ka>0&&CUM[k]-CUM[ka]<CFG.tangentWindow)ka--;
+        let kb=k;while(kb<n-1&&CUM[kb]-CUM[k]<CFG.tangentWindow)kb++;
+        TX[k]=DX[ka]-DX[kb];TY[k]=DY[ka]-DY[kb];TZ[k]=DZ[ka]-DZ[kb];
+        // 前後兩段方向夾角 → 曲率半徑 r≈弧長/夾角；急轉彎（折返）時 r 很小
+        const ax=DX[k]-DX[ka],ay=DY[k]-DY[ka],az=DZ[k]-DZ[ka],bx=DX[kb]-DX[k],by=DY[kb]-DY[k],bz=DZ[kb]-DZ[k];
+        const la_=Math.hypot(ax,ay,az),lb_=Math.hypot(bx,by,bz);
+        if(la_>1e-6&&lb_>1e-6){const c=Math.max(-1,Math.min(1,(ax*bx+ay*by+az*bz)/(la_*lb_)));const ang=Math.acos(c);RAD[k]=ang>1e-3?(la_+lb_)/ang:1e3;}else RAD[k]=1e3;
+      }
+      // 第二遍：方向連續＋寬度（受兩端圓頭與曲率半徑限制，折返處自然收窄而不是炸成扇形尖刺）
       for(let k=0;k<n;k++){
         const u=Math.min(1,DA[k]/R.life);
-        const ka=Math.max(0,k-1),kb=Math.min(n-1,k+1);tan.set(DX[ka]-DX[kb],DY[ka]-DY[kb],DZ[ka]-DZ[kb]);if(tan.lengthSq()<1e-10)tan.set(0,1,0);
-        view.set(cam.position.x-DX[k],cam.position.y-DY[k],cam.position.z-DZ[k]);side.crossVectors(tan,view);if(side.lengthSq()<1e-12)side.set(1,0,0);side.normalize();
-        const w=R.width*CFG.scale*0.5*(R.taper?(1-u):1);
-        const o=k*6;pa[o]=DX[k]-side.x*w;pa[o+1]=DY[k]-side.y*w;pa[o+2]=DZ[k]-side.z*w;pa[o+3]=DX[k]+side.x*w;pa[o+4]=DY[k]+side.y*w;pa[o+5]=DZ[k]+side.z*w;
-        if(k>0)acc+=Math.hypot(DX[k]-DX[k-1],DY[k]-DY[k-1],DZ[k]-DZ[k-1]);
-        la[k*2]=la[k*2+1]=acc;
+        tan.set(TX[k],TY[k],TZ[k]);if(tan.lengthSq()<1e-12)tan.set(0,1,0);
+        view.set(cam.position.x-DX[k],cam.position.y-DY[k],cam.position.z-DZ[k]);side.crossVectors(tan,view);
+        if(side.lengthSq()<1e-12){if(k>0)side.copy(prevSide);else side.set(1,0,0);}else side.normalize();
+        // 方向連續：路徑折返（尖點）時 cross(tan,view) 會反號，帶子會扭成蝴蝶結而「被切掉一半」；與前一頂點同向即可保持完整寬度
+        if(k>0&&side.dot(prevSide)<0)side.negate();
+        prevSide.copy(side);
+        const e=Math.min(CUM[k],total-CUM[k])/CFG.capLen;const cap=e>=1?1:(e<=0?0:e*e*(3-2*e));
+        let w=R.width*(R.scale||CFG.scale)*0.5*(R.taper?(1-u):1)*cap;
+        w=Math.min(w,RAD[k]*CFG.curveK);
+        WD[k]=w;SXs[k]=side.x;SYs[k]=side.y;SZs[k]=side.z;
+      }
+      // 寬度做一次三點平滑，避免相鄰頂點寬度突變
+      for(let k=0;k<n;k++){const wa=WD[Math.max(0,k-1)],wb=WD[Math.min(n-1,k+1)];WS[k]=(wa+2*WD[k]+wb)/4;}
+      for(let k=0;k<n;k++){
+        const u=Math.min(1,DA[k]/R.life),w=WS[k];
+        const o=k*6;pa[o]=DX[k]-SXs[k]*w;pa[o+1]=DY[k]-SYs[k]*w;pa[o+2]=DZ[k]-SZs[k]*w;pa[o+3]=DX[k]+SXs[k]*w;pa[o+4]=DY[k]+SYs[k]*w;pa[o+5]=DZ[k]+SZs[k]*w;
+        la[k*2]=la[k*2+1]=CUM[k];
         lerpKeys(R.grad,u,col4);col4[3]*=DV[k];const c=k*8;for(let j=0;j<4;j++){ca[c+j]=col4[j];ca[c+4+j]=col4[j];}
       }
       m.geometry.setDrawRange(0,(n-1)*6);m.geometry.attributes.position.needsUpdate=true;m.geometry.attributes.aCol.needsUpdate=true;m.geometry.attributes.aLen.needsUpdate=true;
@@ -833,10 +863,16 @@ function createHandTrail(scene){
           if(h.sp>CFG.startSpeed){h.act=true;h.offT=0;}
           else if(h.act&&h.sp<CFG.startSpeed*CFG.stopRatio){h.offT+=dt;if(h.offT>CFG.hold)h.act=false;}
           else if(h.act)h.offT=0;
-          // 可見度包絡（取代「清掉點」的突然出現／消失）：出現快、消失慢
-          const tgt=h.act?1:0;h.vis+=(tgt-h.vis)*Math.min(1,dt/(tgt>h.vis?CFG.attack:CFG.release));
-          if(!h.has||dist>=CFG.minStep){h.pts.push({x:v.x,y:v.y,z:v.z,age:0,vis:h.vis});if(h.pts.length>N)h.pts.shift();}
-          else if(h.pts.length){const q=h.pts[h.pts.length-1];q.x=v.x;q.y=v.y;q.z=v.z;q.age=0;q.vis=h.vis;}
+          // 可見度：只在「新光帶開始」時淡入（避免突然冒出）；停下來時不淡出，改為停止新增點，由壽命自然縮短，頭端仍接在手上
+          if(h.act)h.vis+=(1-h.vis)*Math.min(1,dt/CFG.attack);
+          if(h.act){
+            if(!h.has||dist>=CFG.minStep){h.pts.push({x:v.x,y:v.y,z:v.z,age:0,vis:h.vis});if(h.pts.length>N)h.pts.shift();}
+            else if(h.pts.length){const q=h.pts[h.pts.length-1];q.x=v.x;q.y=v.y;q.z=v.z;q.age=0;q.vis=h.vis;}
+          }else{
+            const q=h.pts[h.pts.length-1];
+            if(q&&Math.hypot(v.x-q.x,v.y-q.y,v.z-q.z)>CFG.detach){h.pts.length=0;}     // 手已離開最後一點很遠：這條光帶結束，避免拉出長直線
+            if(!h.pts.length)h.vis=0;
+          }
           if(h.has)CFG.dots.forEach((T,ti)=>{h.carry[ti]+=dist/CFG.dotScale*T.rate*0.6;let emitted=0;h.carry[ti]=Math.min(h.carry[ti],4);while(h.carry[ti]>=1){h.carry[ti]-=1;if(emitted++>=1)continue;pp.lerpVectors(h.last,v,Math.random());emitDot(pp,T);}});
           h.last.copy(v);h.has=true;
         }
