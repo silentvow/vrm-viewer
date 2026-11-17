@@ -45,7 +45,7 @@ body.nosd #side{display:none}
 #sidebtn:hover,#sidebtn:focus-visible{opacity:1}
 </style>
 <div id="side">
-  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.8.3</span></h1>
+  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.8.4</span></h1>
   <div class="sub">在瀏覽器裡檢視 VRM 模型、播放 VRMA 動作、擺姿勢、調表情、換背景、配音樂。檔案只在你的瀏覽器內讀取，不會上傳。</div>
 
 
@@ -1492,6 +1492,31 @@ function updateInfo(){
    `蒙皮網格 ${meshes.length}、三角形 ${Math.round(tris).toLocaleString()}`,`彈簧骨關節 ${nj}、碰撞體 ${nc}`,
    `動作：${action?vrmaName+`（${clip.duration.toFixed(2)} 秒）`:(vmdPlay?'VMD：'+vmdPlay.name+`（${vmdPlay.dur.toFixed(2)} 秒）`:poseK?'姿勢：'+poseK.name:'無')}`].join('\n');
 }
+// ---------- 翅膀卡住修復（彈簧骨）
+// 快速轉身／彎腰時，翅膀（Wing_*）可能被甩到身體前方；之後彈簧把它拉回後方的路徑被大腿／骨盆碰撞體擋住，就會「穩定地」卡在短褲前方（穿透，T-pose 也不會回來）。
+// 偵測：翅膀末端關節在骨盆座標系中持續（>0.5s）位於前方的短褲區，就只重設該側翅膀的彈簧關節（不動頭髮／袖子）。
+const WG={tL:0,tR:0,hips:null,vrmRef:null,L:[],R:[],V:new THREE.Vector3(),pp:new THREE.Vector3(),pq:new THREE.Quaternion(),lastT:null,q:new THREE.Quaternion(),has:false};
+function wingGuard(dt){
+  if(window.__noWG)return;
+  if(!vrm||!vrm.springBoneManager||!$('spr').checked){WG.vrmRef=null;return;}
+  if(WG.vrmRef!==vrm){WG.vrmRef=vrm;WG.has=false;WG.lastT=null;WG.tL=WG.tR=0;WG.hips=vrm.humanoid&&vrm.humanoid.getNormalizedBoneNode('hips');WG.L=[];WG.R=[];
+    for(const j of vrm.springBoneManager.joints){const m=/^Wing_([LR])_(\d+)$/.exec(j.bone.name);if(m)(m[1]==='L'?WG.L:WG.R).push(j);}}
+  if(!WG.hips||(!WG.L.length&&!WG.R.length))return;
+  WG.hips.updateWorldMatrix(true,false);
+  // 姿勢不連續（動作開始／迴圈接縫／拖曳進度）：身體瞬間位移或轉向，彈簧骨還留在舊位置，會被碰撞體「推」到身體另一側而卡住（實測：Liar Dancer 開頭起翅膀 30 秒都卡在短褲前方）。
+  // 偵測到跳變就以當下姿勢重設整套彈簧（頭髮／衣袖也一併歸位，反正它們在跳變當下本來就是錯的）。
+  {WG.hips.getWorldPosition(WG.V);WG.hips.getWorldQuaternion(WG.q);
+   if(WG.has){const jump=WG.V.distanceTo(WG.pp)>0.25||WG.q.angleTo(WG.pq)>1.2;if(jump){vrm.springBoneManager.reset();WG.tL=WG.tR=0;}}
+   WG.pp.copy(WG.V);WG.pq.copy(WG.q);WG.has=true;}
+  // 動作時間不連續（換動作／迴圈接縫／拖曳進度）同樣重設一次
+  {const T=motionTime();if(T===null){WG.lastT=null;}else{if(WG.lastT==null||Math.abs(T-WG.lastT)>0.25){vrm.springBoneManager.reset();WG.tL=WG.tR=0;}WG.lastT=T;}}
+  for(const side of ['L','R']){
+    const js=WG[side];if(!js.length)continue;let front=false;
+    for(const j of js){const tip=j.child||j.bone;tip.getWorldPosition(WG.V);WG.hips.worldToLocal(WG.V);if(WG.V.z>0.05&&WG.V.y>-0.55&&WG.V.y<0.15&&Math.abs(WG.V.x)<0.3){front=true;break;}}
+    const k='t'+side;if(front){WG[k]+=dt;if(WG[k]>0.5){for(const j of js)j.reset();WG[k]=0;}}else WG[k]=0;
+  }
+}
+window.__wingGuard=wingGuard;
 // ---------- loop
 const clock=new THREE.Clock();
 function tick(){requestAnimationFrame(tick);frame();}
@@ -1507,7 +1532,7 @@ function frame(){
     if(poseK&&poseM){applyPoseK(vrm,poseK.comp,poseM,Math.min(1,(performance.now()-poseK.t0)/500));}
     if(poseM)gazeAt(vrm,poseM,cam.getWorldPosition(new THREE.Vector3()),GZ.k);
     exprTick(dt);
-    vrm.update(dt);
+    vrm.update(dt);wingGuard(dt);
   }
   handTrail.update(playing?dt:0,cam,!!($('handTrail')&&$('handTrail').checked),vrm,cv.clientHeight||600);
   {const tt=performance.now()/1000;for(const b of Object.values(BD))if(b.active)b.update(tt);}
@@ -1618,6 +1643,6 @@ if($('pickOn')){(function(){
   $('seamRun').onclick=()=>{seamScan().catch(e=>{$('seamOut').textContent='錯誤：'+e.message;});};
   $('meshRefresh').onclick=listMeshes;
 })();}
-window.__vmdAt=(t)=>{if(!vmdPlay)return 0;vmdPlay.t=t;stepVmd(0);vrm.update(0.001);return vmdPlay.dur;};window.__VERSION=($('ver')||{}).textContent;window.__ALL_POSES=ALL_POSES;window.__startPose=startPose;window.__loadVRMA=(...x)=>loadVRMA(...x);window.__FILES=()=>FILES;window.__step=(dt)=>{if(!vrm)return;if(mixer&&action)mixer.update(dt);exprTick(dt);vrm.update(dt);};window.__render=()=>{ctl.update();renderer.render(scene,cam);};window.__finishPose=()=>{if(poseK&&poseM)applyPoseK(vrm,poseK.comp,poseM,1);vrm.update(0.001);};window.__cam=()=>cam;window.__vrmGet=()=>vrm;window.__mx=()=>({mixer,action,clip});
+window.__vmdAt=(t)=>{if(!vmdPlay)return 0;vmdPlay.t=t;stepVmd(0);vrm.update(0.001);return vmdPlay.dur;};window.__VERSION=($('ver')||{}).textContent;window.__ALL_POSES=ALL_POSES;window.__startPose=startPose;window.__loadVRMA=(...x)=>loadVRMA(...x);window.__FILES=()=>FILES;window.__step=(dt)=>{if(!vrm)return;if(mixer&&action)mixer.update(dt);exprTick(dt);vrm.update(dt);wingGuard(dt);};window.__render=()=>{ctl.update();renderer.render(scene,cam);};window.__finishPose=()=>{if(poseK&&poseM)applyPoseK(vrm,poseK.comp,poseM,1);vrm.update(0.001);};window.__cam=()=>cam;window.__vrmGet=()=>vrm;window.__mx=()=>({mixer,action,clip});
 tick();
 </script>
