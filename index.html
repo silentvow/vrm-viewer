@@ -45,7 +45,7 @@ body.nosd #side{display:none}
 #sidebtn:hover,#sidebtn:focus-visible{opacity:1}
 </style>
 <div id="side">
-  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.8.2</span></h1>
+  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.8.3</span></h1>
   <div class="sub">在瀏覽器裡檢視 VRM 模型、播放 VRMA 動作、擺姿勢、調表情、換背景、配音樂。檔案只在你的瀏覽器內讀取，不會上傳。</div>
 
 
@@ -1299,8 +1299,11 @@ window.__aud=aud;window.__frame=()=>frame();addEventListener('pointerdown',()=>{
 let audioDrive=false;     // true while the music clock drives the motion (music = master, so a slow frame never makes the sound stutter)
 function motionTime(){if(vmdPlay)return vmdPlay.t;if(action&&clip&&clip.duration)return action.time%clip.duration;return null;}
 function motionDur(){return vmdPlay?vmdPlay.dur:(clip?clip.duration:0);}
-function syncMusic(){
-  audioDrive=false;if(!musicName)return;const T=motionTime();
+// 音樂時鐘平滑器：<audio>.currentTime 只以約 16ms 階梯更新（誤差 ±8ms，且與畫面幀交錯成重複幀／雙倍跳幀），快舞（旋轉、揮手）會因此抖動。
+// 做法：動作時間用本地時鐘（每幀 +dt×速度）推進，再以時間常數 0.4s 緩慢拉向音樂時間；差超過 0.12s（拖曳進度、迴圈、卡頓）才直接對齊。
+const MC={t:0,on:false};
+function syncMusic(dt){
+  audioDrive=false;if(!(dt>0))dt=0;const wasOn=MC.on;MC.on=false;if(!musicName)return;const T=motionTime();
   if(T===null){if(!aud.paused)aud.pause();return;}
   const sp=+$('speed').value;if(aud.playbackRate!==sp)aud.playbackRate=sp;aud.loop=$('loop').checked;
   const dur=motionDur();
@@ -1312,6 +1315,7 @@ function syncMusic(){
       }
     }else if(aud.readyState>=2){                      // music is playing: it drives the motion
       audioDrive=true;let t=aud.currentTime;
+      {const sp2=aud.playbackRate||1;if(!wasOn||Math.abs(MC.t-t)>0.12){MC.t=t;}else{MC.t+=dt*sp2;MC.t+=(t-MC.t)*Math.min(1,dt/0.4);}MC.on=true;t=MC.t;}
       if(vmdPlay){vmdPlay.t=$('loop').checked?t%dur:Math.min(t,dur);}
       else if(action&&clip){action.time=$('loop').checked?t%dur:Math.min(t,dur);}
     }
@@ -1493,7 +1497,7 @@ const clock=new THREE.Clock();
 function tick(){requestAnimationFrame(tick);frame();}
 function frame(){
   const dt=Math.min(clock.getDelta(),1/20);
-  syncMusic();
+  syncMusic(dt);
   if(vrm){
     if(mixer&&action){
       if(playing)mixer.update(audioDrive?0:dt*(+$('speed').value));
