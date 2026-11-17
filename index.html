@@ -45,7 +45,7 @@ body.nosd #side{display:none}
 #sidebtn:hover,#sidebtn:focus-visible{opacity:1}
 </style>
 <div id="side">
-  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.7.1</span></h1>
+  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.8.0</span></h1>
   <div class="sub">在瀏覽器裡檢視 VRM 模型、播放 VRMA 動作、擺姿勢、調表情、換背景、配音樂。檔案只在你的瀏覽器內讀取，不會上傳。</div>
 
 
@@ -90,6 +90,7 @@ body.nosd #side{display:none}
 
   <h2>畫面</h2>
   <div class="row"><label class="chk"><input type="checkbox" id="grid" checked>地板格線</label><label class="chk"><input type="checkbox" id="skel">骨架</label><label class="chk"><input type="checkbox" id="wire">線框</label></div>
+  <div class="row"><label class="chk"><input type="checkbox" id="handTrail">手部拖尾特效（雙色光帶＋星芒＋音符，仿 MateEngine 舞蹈）</label></div>
   <div class="row"><label class="chk"><input type="checkbox" id="rot">自動旋轉</label><span class="grow"></span><span class="sub">背景</span>
     <select id="bg"><option value="#2b2e36">深灰</option><option value="#8f95a3">中灰</option><option value="#f2f2f2">白</option><option value="#00b140">綠幕</option><option value="#101216">黑</option><option value="stage">演唱會舞台</option><option value="studio">攝影棚</option><option value="sakura">櫻花庭園</option><option value="cyber">賽博雨夜</option><option value="aurora">星空極光</option></select></div>
   <div class="row" id="stageRow" style="display:none"><span class="sub">背景配色</span><select id="stageTheme"><option value="pinkblue">粉藍</option><option value="redgold">紅金</option><option value="purplegreen">紫綠</option></select><label class="chk"><input type="checkbox" id="stageLight" checked>場景光色（彩色逆光）</label></div>
@@ -656,6 +657,207 @@ function createStage(scene){
 return {createStage};
 })();
 
+// ===== lib/handtrail.js（內嵌；手部拖尾特效，自製、程式繪製）=====
+const {createHandTrail}=(()=>{
+// 手部拖尾特效（自製、程式產生，不使用任何外部素材；圖案以 canvas 即時繪製）。
+// 設計依 MateEngine 實機（Standard 主題）：Trail 1 掛左手（洋紅）、Trail 2 掛右手（青藍）；每隻手 = 兩條加色光帶（HDR 過曝成白芯＋顏色邊）
+// ＋ 星芒閃光粒子 ＋ 音符粒子（兩種粒子都依「移動距離」發射，world space，顏色隨壽命 青藍→紫→淡出）。
+// 用法：const trail=createHandTrail(scene);  每幀（vrm.update 之後）trail.update(dt,cam,enabled,vrm,viewportHeightPx);
+const SUB=12;   // 光帶點列以 Catmull-Rom 細分（低幀率時讓弧線平滑）
+const CFG={scale:4.4,dotScale:1.0,maxPts:90,minStep:0.003,teleport:0.6,maxDots:500,
+  // 光帶出現門檻：手速（m/s）超過 startSpeed 才開始拉出光帶；速度掉回門檻以下後，再持續 hold 秒才停止延伸（停滯寬限）
+  startSpeed:1.0,stopRatio:0.6,hold:0.25,speedTau:0.08,attack:0.06,release:0.15,
+  // 光帶：life 壽命(s)、width 寬度（實機單位，×scale）、taper 尾端收尖、
+  // grad：[u,r,g,b,a]（u=0 頭端→1 尾端；取自實機漸層）
+  ribbons:[
+    {life:0.25,width:0.06,taper:false,gain:4.0,
+     grad:[[0,.245,.634,1,0],[.0236,.30,.70,1,.39],[.2,.475,.942,1,.34],[.446,.33,1,.76,.235],[.674,.236,1,.42,.10],[1,.236,1,.42,0]]},
+    {life:0.80,width:0.03,taper:true,gain:4.0,
+     grad:[[0,.245,.634,1,0],[.022,.30,.70,1,.39],[.2,.475,.942,1,.36],[.762,.665,.235,1,.31],[.803,.665,.235,1,.24],[1,.665,.235,1,0]]}],
+  // 每隻手各光帶的 HDR 顏色倍率（實機材質 _Main_Color）。left＝Trail 1（洋紅），right＝Trail 2（青藍）
+  tint:{leftHand:[[0.89,1.23,3.0],[57.0,8.1,68.6]],rightHand:[[0.89,1.23,3.0],[2.87,7.19,32.0]]},
+  // 粒子：rate 每單位距離發射數、life 壽命、size 邊長、radius 發射球半徑、sizeCurve [[t,v]…]、col [[t,r,g,b,a]…]（取自實機）
+  dots:[{kind:0,rate:4,life:0.6,size:0.13,radius:0.05,sizeCurve:[[0,0],[.18,.96],[1,0]],gain:2.0,
+         col:[[0,.198,.758,1,0],[.0625,.198,.758,1,1],[.837,.538,.34,1,.2],[1,.538,.34,1,0]]},
+        {kind:1,rate:3,life:0.7,size:0.24,radius:0.03,sizeCurve:[[0,.33],[.7,1],[1,.6]],gain:3.0,
+         col:[[0,0,.77,1,0],[.12,0,.77,1,1],[.78,.464,.18,1,.6],[1,.464,.18,1,0]]}]};
+function lerpKeys(G,u,out){
+  for(let i=1;i<G.length;i++){
+    if(u<=G[i][0]){const a=G[i-1],b=G[i],k=(u-a[0])/(b[0]-a[0]||1);for(let j=0;j<out.length;j++)out[j]=a[j+1]+(b[j+1]-a[j+1])*k;return out;}
+  }
+  const l=G[G.length-1];for(let j=0;j<out.length;j++)out[j]=l[j+1];return out;
+}
+function curve(C,t){for(let i=1;i<C.length;i++){if(t<=C[i][0]){const a=C[i-1],b=C[i],k=(t-a[0])/(b[0]-a[0]||1);return a[1]+(b[1]-a[1])*k;}}return C[C.length-1][1];}
+const RIBBON_VS=`attribute vec4 aCol;attribute float aLen;varying vec4 vCol;varying vec2 vUv;varying float vLen;void main(){vCol=aCol;vUv=uv;vLen=aLen;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`;
+// 貼圖近似：中央一條略為擺動的細亮線（寬約帶寬 16%）；顏色＝漸層×HDR 倍率，過曝後以 1-exp 壓縮 → 白芯＋顏色邊（等同實機的過曝／泛光）
+const RIBBON_FS=`uniform vec3 uTint;uniform float uGain;uniform float uTile;varying vec4 vCol;varying vec2 vUv;varying float vLen;
+void main(){
+  float v=vUv.x;float L=vLen*uTile;
+  float c=0.5+0.03*sin(L*6.283+1.3)+0.015*sin(L*6.283*3.3);
+  float d=(v-c)/0.22;float line=exp(-d*d*2.4);
+  float dh=(v-0.5)/0.45;line+=0.05*exp(-dh*dh*3.0);
+  vec3 x=vCol.rgb*uTint*(vCol.a*line*uGain);
+  x=mix(x,vec3((x.r+x.g+x.b)/3.0),0.3);   // 偏向白，讓顏色更淡（實機為淡青白＋粉邊）
+  vec3 o=1.0-exp(-x);
+  if(max(o.r,max(o.g,o.b))<0.004)discard;
+  gl_FragColor=vec4(o,1.0);}`;
+const DOT_VS=`attribute float aLife;attribute float aSize;attribute float aRot;attribute float aKind;attribute vec4 aCol;uniform float uScale;varying vec4 vC;varying float vRot;varying float vKind;
+void main(){vC=aCol;vRot=aRot;vKind=aKind;vec4 mv=modelViewMatrix*vec4(position,1.0);gl_PointSize=clamp(aSize*uScale/max(0.05,-mv.z),1.0,512.0);gl_Position=projectionMatrix*mv;}`;
+const DOT_FS=`uniform sampler2D uTex;varying vec4 vC;varying float vRot;varying float vKind;
+void main(){vec2 p=gl_PointCoord-0.5;p.y=-p.y;float cs=cos(vRot),sn=sin(vRot);p=vec2(cs*p.x-sn*p.y,sn*p.x+cs*p.y)+0.5;
+  if(p.x<0.0||p.x>1.0||p.y<0.0||p.y>1.0)discard;
+  vec2 uv;if(vKind<0.5){uv=vec2(p.x*0.5,p.y);}else{float f=floor(vKind-0.5);uv=vec2(0.5+(mod(f,2.0)+p.x)*0.25,(floor(f/2.0)+p.y)*0.5);}
+  float a=texture2D(uTex,uv).a;
+  vec3 o=1.0-exp(-vC.rgb*(a*vC.a));if(max(o.r,max(o.g,o.b))<0.004)discard;gl_FragColor=vec4(o,1.0);}`;
+// 圖集（canvas）：寬 1024×高 512。左半 512×512＝星芒；右半 512×512 為 2×2 音符（♪ ♫ ♩ ♬ 樣式），白色＋柔光
+function makeAtlas(){
+  const cv=document.createElement('canvas');cv.width=1024;cv.height=512;const g=cv.getContext('2d');g.clearRect(0,0,1024,512);
+  // 星芒：四芒＋中心光暈
+  const cx=256,cy=256;
+  let rg=g.createRadialGradient(cx,cy,0,cx,cy,48);rg.addColorStop(0,'rgba(255,255,255,1)');rg.addColorStop(0.25,'rgba(255,255,255,0.55)');rg.addColorStop(1,'rgba(255,255,255,0)');g.fillStyle=rg;g.fillRect(0,0,512,512);
+  for(const [lx,ly,ang] of [[240,6,0],[240,6,Math.PI/2]]){
+    g.save();g.translate(cx,cy);g.rotate(ang);
+    const lg=g.createLinearGradient(-240,0,240,0);lg.addColorStop(0,'rgba(255,255,255,0)');lg.addColorStop(0.5,'rgba(255,255,255,1)');lg.addColorStop(1,'rgba(255,255,255,0)');
+    g.fillStyle=lg;g.beginPath();g.moveTo(-240,0);g.quadraticCurveTo(0,-9,240,0);g.quadraticCurveTo(0,9,-240,0);g.fill();g.restore();
+  }
+  // 音符
+  function head(x,y,r){g.save();g.translate(x,y);g.rotate(-0.4);g.beginPath();g.ellipse(0,0,r*1.25,r,0,0,Math.PI*2);g.fill();g.restore();}
+  function note(ox,oy,kind){
+    g.save();g.translate(512+ox,oy);g.fillStyle='#fff';g.strokeStyle='#fff';g.lineCap='round';g.lineJoin='round';g.shadowColor='rgba(255,255,255,0.9)';g.shadowBlur=14;g.lineWidth=11;
+    if(kind===0){head(95,200,30);g.beginPath();g.moveTo(122,195);g.lineTo(122,70);g.stroke();g.beginPath();g.moveTo(122,70);g.bezierCurveTo(160,95,190,120,180,170);g.lineWidth=12;g.stroke();}
+    else if(kind===1){head(70,210,28);head(185,190,28);g.beginPath();g.moveTo(96,205);g.lineTo(96,75);g.moveTo(211,185);g.lineTo(211,60);g.stroke();g.lineWidth=20;g.beginPath();g.moveTo(96,80);g.lineTo(211,65);g.stroke();}
+    else if(kind===2){head(100,205,32);g.beginPath();g.moveTo(130,200);g.lineTo(130,60);g.stroke();}
+    else{head(60,215,24);head(130,200,24);head(200,185,24);g.beginPath();g.moveTo(82,210);g.lineTo(82,75);g.moveTo(152,195);g.lineTo(152,62);g.moveTo(222,180);g.lineTo(222,50);g.stroke();g.lineWidth=15;g.beginPath();g.moveTo(82,82);g.lineTo(222,56);g.moveTo(82,118);g.lineTo(222,92);g.stroke();}
+    g.restore();
+  }
+  // 音符格：每格 256×256；kind 順序對應 aKind-1 的 0..3：[左下,右下,左上,右上]（canvas y 向下）
+  note(0,256,0);note(256,256,1);note(0,0,2);note(256,0,3);
+  const t=new THREE.CanvasTexture(cv);t.colorSpace=THREE.NoColorSpace;t.generateMipmaps=true;t.minFilter=THREE.LinearMipmapLinearFilter;t.flipY=true;return t;
+}
+function createHandTrail(scene){
+  const group=new THREE.Group();group.visible=false;group.renderOrder=10;scene.add(group);
+  const N=CFG.maxPts*SUB;
+  function makeRibbon(R,tint){
+    const g=new THREE.BufferGeometry();
+    const pos=new Float32Array(N*2*3),col=new Float32Array(N*2*4),len=new Float32Array(N*2),uv=new Float32Array(N*2*2),idx=new Uint16Array((N-1)*6);
+    for(let i=0;i<N;i++){uv[i*4]=0;uv[i*4+1]=i/(N-1);uv[i*4+2]=1;uv[i*4+3]=i/(N-1);}
+    for(let i=0;i<N-1;i++){const a=i*2,b=i*2+1,c=i*2+2,d=i*2+3;idx.set([a,b,c,b,d,c],i*6);}
+    g.setAttribute('position',new THREE.BufferAttribute(pos,3).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('aCol',new THREE.BufferAttribute(col,4).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('aLen',new THREE.BufferAttribute(len,1).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('uv',new THREE.BufferAttribute(uv,2));g.setIndex(new THREE.BufferAttribute(idx,1));g.setDrawRange(0,0);
+    const m=new THREE.ShaderMaterial({vertexShader:RIBBON_VS,fragmentShader:RIBBON_FS,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide,
+      uniforms:{uTint:{value:new THREE.Vector3(...tint)},uGain:{value:R.gain},uTile:{value:1.0/CFG.scale}}});
+    const mesh=new THREE.Mesh(g,m);mesh.frustumCulled=false;mesh.renderOrder=10;mesh.userData.R=R;group.add(mesh);return mesh;
+  }
+  const maxLife=Math.max(...CFG.ribbons.map(r=>r.life));
+  const hands=['leftHand','rightHand'].map(name=>({name,pts:[],meshes:CFG.ribbons.map((R,i)=>makeRibbon(R,CFG.tint[name][i])),last:new THREE.Vector3(),has:false,carry:[0,0],sp:0,act:false,offT:0,vis:0}));
+  const D=CFG.maxDots,dg=new THREE.BufferGeometry();
+  const dpos=new Float32Array(D*3),dlife=new Float32Array(D).fill(1),dsize=new Float32Array(D),drot=new Float32Array(D),dkind=new Float32Array(D),dcol=new Float32Array(D*4);
+  const addAttr=(n,a,s)=>dg.setAttribute(n,new THREE.BufferAttribute(a,s).setUsage(THREE.DynamicDrawUsage));
+  addAttr('position',dpos,3);addAttr('aLife',dlife,1);addAttr('aSize',dsize,1);addAttr('aRot',drot,1);addAttr('aKind',dkind,1);addAttr('aCol',dcol,4);
+  const atlas=makeAtlas();
+  const dmat=new THREE.ShaderMaterial({vertexShader:DOT_VS,fragmentShader:DOT_FS,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,uniforms:{uScale:{value:600},uTex:{value:atlas}}});
+  const dots=new THREE.Points(dg,dmat);dots.frustumCulled=false;dots.renderOrder=11;group.add(dots);
+  const dl=[];for(let i=0;i<D;i++)dl.push({age:1,life:1,T:null,baseSize:0});
+  let di=0,curVrm=null;
+  const v=new THREE.Vector3(),side=new THREE.Vector3(),view=new THREE.Vector3(),tan=new THREE.Vector3(),pp=new THREE.Vector3(),col4=[0,0,0,0];
+  function clear(){for(const h of hands){h.pts.length=0;h.has=false;h.carry=[0,0];h.act=false;h.offT=0;h.vis=0;h.sp=0;for(const m of h.meshes)m.geometry.setDrawRange(0,0);}for(const b of dl)b.age=b.life=1;for(let i=0;i<D;i++){dlife[i]=1;dsize[i]=0;}dg.attributes.aLife.needsUpdate=true;dg.attributes.aSize.needsUpdate=true;}
+  // 暫存陣列（避免每幀配置大量物件造成 GC 卡頓）
+  const SX=new Float32Array(N),SY=new Float32Array(N),SZ=new Float32Array(N),SA=new Float32Array(N),SV=new Float32Array(N);
+  const DX=new Float32Array(N),DY=new Float32Array(N),DZ=new Float32Array(N),DA=new Float32Array(N),DV=new Float32Array(N);
+  const mix=(a,b,k)=>a+(b-a)*k;
+  function build(h,cam){
+    const P=h.pts;
+    for(const m of h.meshes){
+      const R=m.userData.R;
+      let cnt=0;
+      for(let i=P.length-1;i>=0&&cnt<N;i--){const q=P[i];if(q.age>R.life)break;SX[cnt]=q.x;SY[cnt]=q.y;SZ[cnt]=q.z;SA[cnt]=q.age;SV[cnt]=q.vis;cnt++;}   // 0＝頭端（最新）
+      if(cnt<2){m.geometry.setDrawRange(0,0);continue;}
+      // 向心 Catmull-Rom（Barry-Goldman，純數值運算）：點距不均勻時不會尖角／自交；細分數依段長自適應
+      let n=0;
+      for(let i=0;i<cnt-1&&n<N-1;i++){
+        const i0=Math.max(0,i-1),i1=i,i2=i+1,i3=Math.min(cnt-1,i+2);
+        const d12=Math.hypot(SX[i2]-SX[i1],SY[i2]-SY[i1],SZ[i2]-SZ[i1]);
+        const sub=Math.max(1,Math.min(12,Math.ceil(d12/0.03)));
+        const t0=0,t1=t0+Math.sqrt(Math.max(1e-9,Math.hypot(SX[i1]-SX[i0],SY[i1]-SY[i0],SZ[i1]-SZ[i0]))),t2=t1+Math.sqrt(Math.max(1e-9,d12)),t3=t2+Math.sqrt(Math.max(1e-9,Math.hypot(SX[i3]-SX[i2],SY[i3]-SY[i2],SZ[i3]-SZ[i2])));
+        for(let k=0;k<sub&&n<N-1;k++){
+          const t=t1+(t2-t1)*k/sub;
+          const f01=(t-t0)/(t1-t0),f12=(t-t1)/(t2-t1),f23=(t-t2)/(t3-t2),f02=(t-t0)/(t2-t0),f13=(t-t1)/(t3-t1);
+          const cr=(S)=>{const A1=mix(S[i0],S[i1],f01),A2=mix(S[i1],S[i2],f12),A3=mix(S[i2],S[i3],f23);return mix(mix(A1,A2,f02),mix(A2,A3,f13),f12);};
+          DX[n]=cr(SX);DY[n]=cr(SY);DZ[n]=cr(SZ);DA[n]=mix(SA[i1],SA[i2],k/sub);DV[n]=mix(SV[i1],SV[i2],k/sub);n++;
+        }
+      }
+      DX[n]=SX[cnt-1];DY[n]=SY[cnt-1];DZ[n]=SZ[cnt-1];DA[n]=SA[cnt-1];DV[n]=SV[cnt-1];n++;
+      const pa=m.geometry.attributes.position.array,ca=m.geometry.attributes.aCol.array,la=m.geometry.attributes.aLen.array;let acc=0;
+      for(let k=0;k<n;k++){
+        const u=Math.min(1,DA[k]/R.life);
+        const ka=Math.max(0,k-1),kb=Math.min(n-1,k+1);tan.set(DX[ka]-DX[kb],DY[ka]-DY[kb],DZ[ka]-DZ[kb]);if(tan.lengthSq()<1e-10)tan.set(0,1,0);
+        view.set(cam.position.x-DX[k],cam.position.y-DY[k],cam.position.z-DZ[k]);side.crossVectors(tan,view);if(side.lengthSq()<1e-12)side.set(1,0,0);side.normalize();
+        const w=R.width*CFG.scale*0.5*(R.taper?(1-u):1);
+        const o=k*6;pa[o]=DX[k]-side.x*w;pa[o+1]=DY[k]-side.y*w;pa[o+2]=DZ[k]-side.z*w;pa[o+3]=DX[k]+side.x*w;pa[o+4]=DY[k]+side.y*w;pa[o+5]=DZ[k]+side.z*w;
+        if(k>0)acc+=Math.hypot(DX[k]-DX[k-1],DY[k]-DY[k-1],DZ[k]-DZ[k-1]);
+        la[k*2]=la[k*2+1]=acc;
+        lerpKeys(R.grad,u,col4);col4[3]*=DV[k];const c=k*8;for(let j=0;j<4;j++){ca[c+j]=col4[j];ca[c+4+j]=col4[j];}
+      }
+      m.geometry.setDrawRange(0,(n-1)*6);m.geometry.attributes.position.needsUpdate=true;m.geometry.attributes.aCol.needsUpdate=true;m.geometry.attributes.aLen.needsUpdate=true;
+    }
+  }
+  function emitDot(pos,T){
+    const i=di;di=(di+1)%D;const b=dl[i];
+    b.age=0;b.life=T.life;b.T=T;
+    let x,y,z;do{x=Math.random()*2-1;y=Math.random()*2-1;z=Math.random()*2-1;}while(x*x+y*y+z*z>1);
+    const r=T.radius*CFG.dotScale;dpos[i*3]=pos.x+x*r;dpos[i*3+1]=pos.y+y*r;dpos[i*3+2]=pos.z+z*r;
+    b.baseSize=T.size*CFG.dotScale;drot[i]=T.kind===1?Math.random()*Math.PI*2:0;
+    dkind[i]=T.kind===0?0:1+Math.floor(Math.random()*4);dlife[i]=0;dsize[i]=0;
+  }
+  const c4=[0,0,0,0];
+  return {
+    group,clear,CFG,
+    update(dt,cam,enabled,vrm,viewportH){
+      if(vrm!==curVrm){curVrm=vrm;clear();}
+      group.visible=!!(enabled&&vrm);
+      if(!enabled||!vrm){if(hands[0].pts.length||hands[1].pts.length)clear();return;}
+      dmat.uniforms.uScale.value=(viewportH||600)/(2*Math.tan(THREE.MathUtils.degToRad(cam.fov||45)/2));
+      const run=dt>1e-5&&dt<0.15;
+      for(const h of hands){
+        const node=vrm.humanoid&&vrm.humanoid.getRawBoneNode(h.name);if(!node)continue;
+        node.updateWorldMatrix(true,false);node.getWorldPosition(v);
+        for(const q of h.pts)if(run)q.age+=dt;
+        while(h.pts.length&&h.pts[0].age>maxLife)h.pts.shift();
+        if(dt>=0.15||(h.has&&v.distanceTo(h.last)>CFG.teleport)){h.pts.length=0;h.has=false;h.carry=[0,0];h.act=false;h.offT=0;h.vis=0;h.sp=0;}
+        if(run){
+          const dist=h.has?v.distanceTo(h.last):0;
+          // 手速（指數平滑，抵銷音樂時鐘抖動造成的瞬時速度忽大忽小）＋遲滯門檻：超過 startSpeed 才啟動，掉到 stopSpeed 以下再撐 hold 秒才關閉
+          const inst=h.has?dist/dt:0;h.sp+=(inst-h.sp)*Math.min(1,dt/CFG.speedTau);
+          if(h.sp>CFG.startSpeed){h.act=true;h.offT=0;}
+          else if(h.act&&h.sp<CFG.startSpeed*CFG.stopRatio){h.offT+=dt;if(h.offT>CFG.hold)h.act=false;}
+          else if(h.act)h.offT=0;
+          // 可見度包絡（取代「清掉點」的突然出現／消失）：出現快、消失慢
+          const tgt=h.act?1:0;h.vis+=(tgt-h.vis)*Math.min(1,dt/(tgt>h.vis?CFG.attack:CFG.release));
+          if(!h.has||dist>=CFG.minStep){h.pts.push({x:v.x,y:v.y,z:v.z,age:0,vis:h.vis});if(h.pts.length>N)h.pts.shift();}
+          else if(h.pts.length){const q=h.pts[h.pts.length-1];q.x=v.x;q.y=v.y;q.z=v.z;q.age=0;q.vis=h.vis;}
+          if(h.has)CFG.dots.forEach((T,ti)=>{h.carry[ti]+=dist/CFG.dotScale*T.rate*0.6;let emitted=0;h.carry[ti]=Math.min(h.carry[ti],4);while(h.carry[ti]>=1){h.carry[ti]-=1;if(emitted++>=1)continue;pp.lerpVectors(h.last,v,Math.random());emitDot(pp,T);}});
+          h.last.copy(v);h.has=true;
+        }
+        build(h,cam);
+      }
+      if(run){
+        for(let i=0;i<D;i++){
+          const b=dl[i];if(b.age>=b.life){dlife[i]=1;dsize[i]=0;dcol[i*4+3]=0;continue;}
+          b.age+=dt;const t=Math.min(1,b.age/b.life);dlife[i]=t;
+          dsize[i]=b.baseSize*curve(b.T.sizeCurve,t);
+          lerpKeys(b.T.col,t,c4);dcol[i*4]=c4[0]*b.T.gain;dcol[i*4+1]=c4[1]*b.T.gain;dcol[i*4+2]=c4[2]*b.T.gain;dcol[i*4+3]=c4[3];
+        }
+        for(const n of ['position','aLife','aSize','aRot','aKind','aCol'])dg.attributes[n].needsUpdate=true;
+      }
+    }
+  };
+}
+
+return {createHandTrail};
+})();
+
 // ===== lib/backdrops.js（內嵌）=====
 const {createStudio,createSakura,createCyber,createAurora}=(()=>{
 // 本機檢視器的非純色背景（程式產生，沒有外部素材）：studio 攝影棚、sakura 櫻花庭園、cyber 賽博雨夜、aurora 星空極光。
@@ -919,6 +1121,7 @@ lKey.shadow.mapSize.set(2048,2048);Object.assign(lKey.shadow.camera,{left:-2.2,r
 const shadowFloor=new THREE.Mesh(new THREE.PlaneGeometry(12,12),new THREE.ShadowMaterial({opacity:0.4}));shadowFloor.rotation.x=-Math.PI/2;shadowFloor.receiveShadow=true;shadowFloor.visible=false;scene.add(shadowFloor);
 const grid=new THREE.GridHelper(10,20,0x667,0x445);scene.add(grid);
 const concert=createStage(scene);window.__stage=concert;
+const handTrail=createHandTrail(scene);window.__trail=handTrail;
 const BD={stage:concert,studio:createStudio(scene),sakura:createSakura(scene),cyber:createCyber(scene),aurora:createAurora(scene)};window.__bd=BD;
 function resize(){const r=$('stage').getBoundingClientRect();renderer.setSize(r.width,r.height,false);cam.aspect=r.width/r.height;cam.updateProjectionMatrix();}
 addEventListener('resize',resize);resize();
@@ -1130,10 +1333,11 @@ const LP={ // 預設組合：key/fill/rim 強度、主光方位(0=正面,+向角
  '側光（戲劇）':{k:3.2,az:80,el:25,fill:0.15,rim:0,amb:0.25,shadow:true,expo:1},
  '逆光（輪廓）':{k:1.2,az:20,el:30,fill:0.2,rim:3.0,amb:0.5,shadow:false,expo:1},
  '頂光':{k:3.0,az:0,el:80,fill:0,rim:0,amb:0.4,shadow:true,expo:1},
+ 'MateEngine 對照（正面平行光）':{k:2.1,az:0,el:0,fill:0,rim:0,amb:1.8,shadow:false,expo:1,col:'#ffffff',ambCol:'#ffffff'},
  '三點打光（攝影棚）':{k:2.4,az:40,el:35,fill:0.9,rim:1.6,amb:0.35,shadow:true,expo:1},
  '平光（只看顏色）':{k:0,az:0,el:0,fill:0,rim:0,amb:2.4,shadow:false,expo:1},
 };
-const LS={k:2.6,az:27,el:42,col:'#ffffff',fill:0,rim:0,amb:0.7,expo:1,tone:0,shadow:false,soft:2,outline:true,outW:1,fov:30,res:1,debug:'none'};
+const LS={k:2.6,az:27,el:42,col:'#ffffff',ambCol:'#ffffff',fill:0,rim:0,amb:0.7,expo:1,tone:0,shadow:false,soft:2,outline:true,outW:1,fov:30,res:1,debug:'none'};
 const LCTL=[ // [key, label, min, max, step]
  ['k','主光強度',0,5,0.05],['az','主光方位（0＝正面）',-180,180,1],['el','主光仰角',-10,90,1],['fill','補光強度（主光對側）',0,3,0.05],['rim','輪廓光強度（背後）',0,4,0.05],['amb','環境光',0,3,0.05],
  ['expo','曝光',0.2,3,0.05],['soft','陰影柔和度',0,8,0.5],['outW','輪廓線粗細（倍率）',0,4,0.05],['fov','視角 FOV',15,70,1]];
@@ -1142,7 +1346,7 @@ function applyLight(){
   lKey.intensity=LS.k;lKey.color.set(LS.col);lightPos(lKey,LS.az,LS.el);
   lFill.intensity=LS.fill;lFill.color.set(LS.col);lightPos(lFill,-LS.az*0.8-30,15);
   lRim.intensity=LS.rim;lRim.color.set('#ffffff');lightPos(lRim,LS.az+180,35);
-  lAmb.intensity=LS.amb;renderer.toneMapping=TONES[LS.tone][1];renderer.toneMappingExposure=LS.expo;
+  lAmb.intensity=LS.amb;lAmb.color.set(LS.ambCol);renderer.toneMapping=TONES[LS.tone][1];renderer.toneMappingExposure=LS.expo;
   const sh=!!LS.shadow;if(renderer.shadowMap.enabled!==sh){renderer.shadowMap.enabled=sh;renderer.shadowMap.type=THREE.PCFSoftShadowMap;scene.traverse(o=>{if(o.material)[].concat(o.material).forEach(m=>m.needsUpdate=true);});}
   lKey.castShadow=sh;lKey.shadow.radius=LS.soft;shadowFloor.visible=sh;
   cam.fov=LS.fov;cam.updateProjectionMatrix();renderer.setPixelRatio(Math.min(devicePixelRatio*LS.res,3));resize();
@@ -1162,7 +1366,7 @@ function applyModelRender(){   // 輪廓線與 MToon 偵錯模式（作用在目
   const row=mk('div',{className:'row'});
   const sel=mk('select',{id:'lPreset',className:'grow','aria-label':'打光預設'});for(const k of Object.keys(LP))sel.appendChild(mk('option',{textContent:k}));
   row.appendChild(sel);box.appendChild(row);
-  const sync=()=>{for(const [k,lab,mn,mx,st] of LCTL){els[k].r.value=LS[k];els[k].v.textContent=(+LS[k]).toFixed(st<1?2:0);}$('lCol').value=LS.col;$('lShadow').checked=LS.shadow;};
+  const sync=()=>{for(const [k,lab,mn,mx,st] of LCTL){els[k].r.value=LS[k];els[k].v.textContent=(+LS[k]).toFixed(st<1?2:0);}$('lCol').value=LS.col;if($('lAmbCol'))$('lAmbCol').value=LS.ambCol;$('lShadow').checked=LS.shadow;};
   for(const [k,lab,mn,mx,st] of LCTL){
     const wrap=mk('div');wrap.style.cssText='display:grid;grid-template-columns:1fr 44px;gap:6px;align-items:center';
     const l=mk('label',{textContent:lab});l.style.fontSize='13px';const v=mk('span',{className:'sub'});v.style.textAlign='right';
@@ -1171,7 +1375,7 @@ function applyModelRender(){   // 輪廓線與 MToon 偵錯模式（作用在目
     els[k]={r,v};wrap.append(l,v,r);box.appendChild(wrap);
   }
   const r2=mk('div',{className:'row'});
-  r2.innerHTML='<label class="chk"><input type="checkbox" id="lShadow">投射陰影</label><label class="chk">主光顏色 <input type="color" id="lCol" value="#ffffff"></label><label class="chk"><input type="checkbox" id="lOutline" checked>輪廓線</label>';
+  r2.innerHTML='<label class="chk"><input type="checkbox" id="lShadow">投射陰影</label><label class="chk">主光顏色 <input type="color" id="lCol" value="#ffffff"></label><label class="chk">環境光顏色 <input type="color" id="lAmbCol" value="#ffffff"></label><label class="chk"><input type="checkbox" id="lOutline" checked>輪廓線</label>';
   box.appendChild(r2);
   const r3=mk('div',{className:'row'});
   r3.innerHTML='<span class="sub">色調映射</span><select id="lTone" class="grow"></select><span class="sub">解析度</span><select id="lRes"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>';
@@ -1180,8 +1384,8 @@ function applyModelRender(){   // 輪廓線與 MToon 偵錯模式（作用在目
   box.appendChild(mk('div',{className:'sub',textContent:'陰影需要打開「投射陰影」；偵錯檢視可看法線、UV、明暗分界比例。'}));
   TONES.forEach(([n],i)=>$('lTone').appendChild(mk('option',{textContent:n,value:i})));
   for(const [n,v] of Object.entries(MToonMaterialDebugMode))$('lDebug').appendChild(mk('option',{textContent:({None:'無',Normal:'法線',LitShadeRate:'明暗比例',UV:'UV'})[n]||n,value:v}));
-  sel.onchange=()=>{const p=LP[sel.value];Object.assign(LS,{k:p.k,az:p.az,el:p.el,fill:p.fill,rim:p.rim,amb:p.amb,shadow:p.shadow,expo:p.expo,col:'#ffffff'});sync();applyLight();};
-  $('lShadow').onchange=()=>{LS.shadow=$('lShadow').checked;applyLight();};$('lCol').oninput=()=>{LS.col=$('lCol').value;applyLight();};
+  sel.onchange=()=>{const p=LP[sel.value];Object.assign(LS,{k:p.k,az:p.az,el:p.el,fill:p.fill,rim:p.rim,amb:p.amb,shadow:p.shadow,expo:p.expo,col:p.col||'#ffffff',ambCol:p.ambCol||'#ffffff'});sync();applyLight();};
+  $('lShadow').onchange=()=>{LS.shadow=$('lShadow').checked;applyLight();};$('lCol').oninput=()=>{LS.col=$('lCol').value;applyLight();};$('lAmbCol').oninput=()=>{LS.ambCol=$('lAmbCol').value;applyLight();};
   $('lOutline').onchange=()=>{LS.outline=$('lOutline').checked;applyLight();};
   $('lTone').onchange=()=>{LS.tone=+$('lTone').value;applyLight();};$('lRes').onchange=()=>{LS.res=+$('lRes').value;applyLight();};$('lDebug').onchange=()=>{LS.debug=$('lDebug').value;applyLight();};
   sync();applyLight();
@@ -1243,6 +1447,7 @@ function frame(){
     exprTick(dt);
     vrm.update(dt);
   }
+  handTrail.update(playing?dt:0,cam,!!($('handTrail')&&$('handTrail').checked),vrm,cv.clientHeight||600);
   {const tt=performance.now()/1000;for(const b of Object.values(BD))if(b.active)b.update(tt);}
   ctl.update();renderer.render(scene,cam);
 }
@@ -1351,6 +1556,6 @@ if($('pickOn')){(function(){
   $('seamRun').onclick=()=>{seamScan().catch(e=>{$('seamOut').textContent='錯誤：'+e.message;});};
   $('meshRefresh').onclick=listMeshes;
 })();}
-window.__vmdAt=(t)=>{if(!vmdPlay)return 0;vmdPlay.t=t;stepVmd(0);vrm.update(0.001);return vmdPlay.dur;};window.__VERSION=($('ver')||{}).textContent;window.__ALL_POSES=ALL_POSES;window.__startPose=startPose;window.__loadVRMA=(...x)=>loadVRMA(...x);window.__FILES=()=>FILES;window.__step=(dt)=>{if(!vrm)return;if(mixer&&action)mixer.update(dt);exprTick(dt);vrm.update(dt);};window.__render=()=>{ctl.update();renderer.render(scene,cam);};window.__finishPose=()=>{if(poseK&&poseM)applyPoseK(vrm,poseK.comp,poseM,1);vrm.update(0.001);};
+window.__vmdAt=(t)=>{if(!vmdPlay)return 0;vmdPlay.t=t;stepVmd(0);vrm.update(0.001);return vmdPlay.dur;};window.__VERSION=($('ver')||{}).textContent;window.__ALL_POSES=ALL_POSES;window.__startPose=startPose;window.__loadVRMA=(...x)=>loadVRMA(...x);window.__FILES=()=>FILES;window.__step=(dt)=>{if(!vrm)return;if(mixer&&action)mixer.update(dt);exprTick(dt);vrm.update(dt);};window.__render=()=>{ctl.update();renderer.render(scene,cam);};window.__finishPose=()=>{if(poseK&&poseM)applyPoseK(vrm,poseK.comp,poseM,1);vrm.update(0.001);};window.__vrmGet=()=>vrm;window.__mx=()=>({mixer,action,clip});
 tick();
 </script>
