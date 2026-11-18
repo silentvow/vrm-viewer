@@ -43,9 +43,10 @@ details.sec>summary:hover{color:var(--fg)}
 body.nosd #side{display:none}
 #sidebtn{position:absolute;top:10px;left:10px;z-index:5;width:34px;height:34px;padding:0;border-radius:8px;border:1px solid var(--line);background:color-mix(in srgb,var(--panel) 82%,transparent);color:var(--fg);font-size:15px;line-height:1;cursor:pointer;opacity:.7}
 #sidebtn:hover,#sidebtn:focus-visible{opacity:1}
+#dirpill{position:absolute;top:10px;right:12px;z-index:5;height:34px;padding:0 12px;border-radius:8px;border:1px solid var(--line);background:color-mix(in srgb,var(--panel) 82%,transparent);color:var(--fg);font-size:13px;cursor:pointer;opacity:.75}#dirpill:hover{opacity:1}#dirpill.on{background:var(--acc);color:#fff;border-color:var(--acc);opacity:1}#dirshot{position:absolute;top:50px;right:14px;z-index:5;font-size:12px;color:#fff;background:rgba(0,0,0,.55);padding:2px 8px;border-radius:6px;pointer-events:none;display:none}
 </style>
 <div id="side">
-  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.8.6</span></h1>
+  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.9.0</span></h1>
   <div class="sub">在瀏覽器裡檢視 VRM 模型、播放 VRMA 動作、擺姿勢、調表情、換背景、配音樂。檔案只在你的瀏覽器內讀取，不會上傳。</div>
 
 
@@ -69,6 +70,13 @@ body.nosd #side{display:none}
   <div class="row" style="align-items:center;gap:6px"><span class="sub">音量</span><input id="vol" class="grow" type="range" min="0" max="100" value="60"><span class="sub" id="volV" style="min-width:2.4em;text-align:right">60</span><button id="mute">靜音</button></div>
   <div class="sub">選擇自己的音樂檔（.ogg .mp3 .wav .m4a）或拖進畫面；音樂跟著動作同步播放，只在你的瀏覽器內讀取。</div>
   <div class="sub" id="musicHint" style="display:none;color:#e0b050"></div>
+
+  <h2>運鏡</h2>
+  <div class="row"><label class="chk"><input type="checkbox" id="dirOn">導播運鏡（C）</label><span class="grow"></span><button id="dirNext" title="換下一個鏡頭（N）">下一鏡頭</button></div>
+  <div class="row gl"><span class="sub">風格</span><select id="dirStyle"><option value="concert">演唱會全場</option><option value="close">特寫為主</option><option value="orbit">慢歌環繞</option><option value="wide">全景為主</option></select>
+    <span class="sub">切換</span><select id="dirLen"><option value="auto">跟節拍（自動）</option><option value="slow">慢（長鏡頭）</option><option value="mid">中</option><option value="fast">快（密集切換）</option></select>
+    <span class="sub">手持晃動</span><span style="display:flex;gap:8px;align-items:center"><input id="dirShake" class="grow" type="range" min="0" max="100" value="35"><span id="dirShakeV" class="sub" style="min-width:2.4em;text-align:right">35</span></span></div>
+  <div class="sub" id="dirInfo">關閉中。開啟後依音樂節拍自動切換鏡頭；拖曳或滾輪可暫時接手，停手 4 秒自動回到運鏡。</div>
 
   <h2>姿勢</h2>
   <div class="row"><select id="pose" class="grow"></select><button id="applyPose">套用</button></div>
@@ -112,7 +120,7 @@ body.nosd #side{display:none}
 <script>
 // 左側面板：每個 h2 區段做成可摺疊（accordion），預設只展開 模型／動作／播放／音樂／姿勢／資訊；狀態記在 localStorage。命名規則：名詞、2–4 字、不放括號（補充說明放標題下的灰字）
 (function(){
-  var OPEN=['模型','動作','播放','音樂','姿勢','資訊'],KEY='vrmviewer.sections',saved={};
+  var OPEN=['模型','動作','播放','音樂','運鏡','姿勢','資訊'],KEY='vrmviewer.sections',saved={};
   try{saved=JSON.parse(localStorage.getItem(KEY)||'{}')}catch(e){}
   var side=document.getElementById('side');
   Array.prototype.slice.call(side.querySelectorAll('h2')).forEach(function(h){
@@ -126,7 +134,7 @@ body.nosd #side{display:none}
   });
 })();
 </script>
-<div id="stage"><canvas id="cv"></canvas><button id="sidebtn" type="button" title="收合／展開左側面板（H）" aria-label="收合左側面板" aria-expanded="true">◀</button>
+<div id="stage"><canvas id="cv"></canvas><button id="sidebtn" type="button" title="收合／展開左側面板（H）" aria-label="收合左側面板" aria-expanded="true">◀</button><button id="dirpill" type="button" title="導播運鏡 開／關（C）；下一鏡頭（N）">🎬 導播</button><div id="dirshot"></div>
   <div id="empty"><strong>尚未載入 VRM</strong><span>按左側「選擇 VRM 檔案…」，或把 .vrm 檔拖到這裡。</span><span>載入後可播放內建動作、擺姿勢、調表情、換背景。</span></div>
   <div id="drop">放開以載入 .vrm / .vrma / 音樂檔</div><div id="msg"><span id="msgt">準備中…</span></div></div>
 <script type="importmap">{"imports":{
@@ -1212,7 +1220,7 @@ async function loadVRM(url,name){
     vrm.scene.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;}});
     try{if(vrm.lookAt){const p=new VRMLookAtQuaternionProxy(vrm.lookAt);p.name='lookAtQuaternionProxy';vrm.scene.add(p);}}catch(e){}
     mixer=new THREE.AnimationMixer(vrm.scene);
-    poseM=measure(vrm);vrm.humanoid.resetNormalizedPose();
+    poseM=measure(vrm);vrm.humanoid.resetNormalizedPose();dirMeasure();
     rebuildHelpers();applyDisplay();fitView();buildExpressions();applyModelRender();updateInfo();
     $('empty').hidden=true;say(`已載入 ${name}`);
     if(keepVrma){await applyVrma(keepVrma.anim,keepVrma.name);}
@@ -1296,7 +1304,8 @@ $('musicClear').onclick=()=>setMusic(null,'');
 $('fm').onchange=e=>{const f=e.target.files[0];if(f)setMusic(URL.createObjectURL(f),f.name);e.target.value='';};
 window.__aud=aud;window.__frame=()=>frame();addEventListener('pointerdown',()=>{if(musicBlocked){musicBlocked=false;musicHint('');}},true);
 let audioDrive=false;     // true while the music clock drives the motion (music = master, so a slow frame never makes the sound stutter)
-function motionTime(){if(vmdPlay)return vmdPlay.t;if(action&&clip&&clip.duration)return action.time%clip.duration;return null;}
+function motionTime(){if(vmdPlay)return vmdPlay.t;if(action&&clip&&clip.duration)return $('loop').checked?action.time%clip.duration:Math.min(action.time,clip.duration);return null;}   // 不循環時不能取餘數：播到尾端會變成 0，音樂就被拉回開頭重播
+function motionFinished(){const d=motionDur(),T=motionTime();return !$('loop').checked&&d>0&&T!==null&&T>=d-0.03;}   // 取消循環且已播到尾端
 function motionDur(){return vmdPlay?vmdPlay.dur:(clip?clip.duration:0);}
 // 音樂時鐘平滑器：<audio>.currentTime 只以約 16ms 階梯更新（誤差 ±8ms，且與畫面幀交錯成重複幀／雙倍跳幀），快舞（旋轉、揮手）會因此抖動。
 // 做法：動作時間用本地時鐘（每幀 +dt×速度）推進，再以時間常數 0.4s 緩慢拉向音樂時間；差超過 0.12s（拖曳進度、迴圈、卡頓）才直接對齊。
@@ -1306,6 +1315,7 @@ function syncMusic(dt){
   if(T===null){if(!aud.paused)aud.pause();return;}
   const sp=+$('speed').value;if(aud.playbackRate!==sp)aud.playbackRate=sp;aud.loop=$('loop').checked;
   const dur=motionDur();
+  if(playing&&motionFinished()){if(!aud.paused)aud.pause();playing=false;$('play').textContent='播放';MC.on=false;return;}   // 播完停住（不重播）；再按「播放」從頭來
   if(playing){
     if(aud.paused||aud.ended){
       if(!musicBlocked&&aud.readyState>=2&&T<(aud.duration||1e9)){
@@ -1324,7 +1334,12 @@ function syncMusic(dt){
 }
 $('play').addEventListener('click',()=>{musicBlocked=false;musicHint('');});
 // ---------- playback
-$('play').onclick=()=>{playing=!playing;$('play').textContent=playing?'暫停':'播放';};
+$('play').onclick=()=>{
+  if(!playing&&motionFinished()){                                  // 播完後按播放＝從頭再播
+    if(vmdPlay)vmdPlay.t=0;else if(action){action.reset();action.play();mixer.update(0);}
+    if(musicName&&aud.readyState>=1)try{aud.currentTime=0;}catch(e){}
+  }
+  playing=!playing;$('play').textContent=playing?'暫停':'播放';};
 $('loop').onchange=()=>{if(action){action.setLoop($('loop').checked?THREE.LoopRepeat:THREE.LoopOnce,Infinity);if($('loop').checked&&!action.isRunning()){action.reset().play();}}};
 $('seek').oninput=()=>{if(vmdPlay){playing=false;$('play').textContent='播放';vmdPlay.t=vmdPlay.dur*$('seek').value/1000;return;}if(!action||!clip)return;playing=false;$('play').textContent='播放';action.paused=false;action.time=clip.duration*($('seek').value/1000);mixer.update(0);};
 // ---------- poses（定義在 poses.js；方向以世界座標設定，VRM 1.0／0.x 通用）
@@ -1518,12 +1533,125 @@ function wingGuard(dt){
   }
 }
 window.__wingGuard=wingGuard;
+// ---------- 導播運鏡（演唱會藍光風格）：多機位切換＋搖臂／環繞／推軌／低角／特寫／手腳插入，依音樂節拍切換，疊加手持晃動
+const DIR={on:false,held:false,down:false,holdUntil:0,style:'concert',len:'auto',shake:0.35,H:1.6,n:0,shot:null,side:1,last:'',
+  beats:null,bpm:0,period:0.5,phase:0,an:'',tgtS:new THREE.Vector3(),anchor:new THREE.Vector3(),fov0:null,blend:null,pose:{pos:new THREE.Vector3(),tgt:new THREE.Vector3()},tPrevT:0,force:null,cutJump:true,fa:0};
+window.__dir=DIR;
+const _v=()=>new THREE.Vector3(),_q=()=>new THREE.Quaternion();
+function dirMeasure(){try{if(!vrm)return;vrm.scene.updateMatrixWorld(true);const h=vrm.humanoid.getRawBoneNode('head');if(h){const p=h.getWorldPosition(_v());DIR.H=Math.max(0.8,p.y*1.07);}}catch(e){}}
+function dirBone(n,out){const b=vrm&&vrm.humanoid.getRawBoneNode(n);return b?b.getWorldPosition(out):out.set(0,DIR.H*0.5,0);}
+// ---- 節拍分析：解碼音樂 -> 能量起音曲線 -> 在 70–180 BPM 內找最吻合的節拍格（BPM＋相位）。失敗就退回 120 BPM。
+async function dirAnalyse(){
+  const src=aud.src||'';if(DIR.an===src)return;DIR.an=src;DIR.beats=null;DIR.bpm=0;DIR.period=0.5;DIR.phase=0;if(!src)return;
+  try{
+    const buf=await (await fetch(src)).arrayBuffer();if(DIR.an!==src)return;
+    const AC=window.OfflineAudioContext||window.webkitOfflineAudioContext;const ab=await new AC(1,1,22050).decodeAudioData(buf);if(DIR.an!==src)return;
+    const x=ab.getChannelData(0),sr=ab.sampleRate,hop=512,win=1024,n=Math.floor((x.length-win)/hop);if(n<200)return;
+    const e=new Float32Array(n);for(let i=0;i<n;i++){let s=0;const o=i*hop;for(let k=0;k<win;k+=2){const v=x[o+k];s+=v*v;}e[i]=Math.log(Math.sqrt(s/(win/2))+1e-3);}
+    const on=new Float32Array(n);for(let i=1;i<n;i++)on[i]=Math.max(0,e[i]-e[i-1]);
+    let m=0;for(let i=0;i<n;i++)m+=on[i];m/=n;for(let i=0;i<n;i++)on[i]=Math.max(0,on[i]-m*0.6);
+    const fr=hop/sr;let best={sc:-1,bpm:120,ph:0};
+    for(let bpm=70;bpm<=180;bpm+=0.25){
+      const per=60/bpm/fr;const prior=1+0.18*Math.exp(-Math.pow(Math.log(bpm/120),2)/(2*0.35*0.35));
+      for(let ph=0;ph<per;ph+=1){let sc=0,c=0;for(let t=ph;t<n-1;t+=per){const i=Math.round(t);sc+=Math.max(on[i-1]||0,on[i],on[i+1]);c++;}sc=sc/c*prior;if(sc>best.sc)best={sc,bpm,ph};}
+    }
+    DIR.bpm=best.bpm;DIR.period=60/best.bpm;DIR.phase=best.ph*fr;
+    const bt=[];for(let t=DIR.phase;t<ab.duration;t+=DIR.period)bt.push(t);DIR.beats=bt;dirInfo();
+  }catch(err){console.warn('dir beat analysis failed',err);}
+}
+// ---- 時間軸：有音樂就用音樂時間，否則用牆上時間；沒有節拍格就假設 120 BPM
+function dirNow(){return(musicName&&aud.readyState>=2&&!aud.paused)?aud.currentTime:performance.now()/1000;}
+const dirPer=()=>DIR.beats?DIR.period:0.5, dirPh=()=>DIR.beats?DIR.phase:0;
+function dirNextBeat(t){const per=dirPer(),ph=dirPh();return ph+Math.ceil((t-ph)/per-1e-6)*per;}
+// ---- 鏡頭庫。fn(p,c)：p=0..1 進度；c={H 身高,a 舞台跟隨點,side ±1,chest/head/hand/foot 骨骼位置,pos/tgt/fov 輸出}。az 以 +Z 為正面。
+const ez=p=>p*p*(3-2*p);
+function dirPos(c,az,dist,h){az+=c.fa;return c.pos.set(c.a.x+Math.sin(az)*dist,h,c.a.z+Math.cos(az)*dist);}   // az 相對於角色目前面向（fa）
+const SHOTS={
+  wide:{name:'全景',beats:[8,16],fn:(p,c)=>{const H=c.H;dirPos(c,c.side*(0.2+0.15*p),H*(3.6-0.4*p),H*0.55);c.tgt.set(c.a.x,H*0.5,c.a.z);c.fov=30;}},
+  medium:{name:'中景',beats:[4,8],fn:(p,c)=>{const H=c.H;dirPos(c,c.side*(0.25-0.1*p),H*(1.95-0.4*p),H*0.62);c.tgt.set(c.a.x*0.4+c.chest.x*0.6,c.chest.y,c.a.z*0.4+c.chest.z*0.6);c.fov=30;}},
+  close:{name:'臉部特寫',beats:[4,8],fn:(p,c)=>{const H=c.H,az=c.side*0.3,d=H*(0.95-0.1*p);c.tgt.set(c.head.x,c.head.y-H*0.015,c.head.z);c.pos.set(c.head.x+Math.sin(az+c.fa)*d,c.head.y+H*0.01,c.head.z+Math.cos(az+c.fa)*d);c.fov=26;}},
+  low:{name:'低角仰拍',beats:[4,8],fn:(p,c)=>{const H=c.H;dirPos(c,c.side*(0.35-0.2*p),H*(2.2-0.35*p),H*(0.08+0.1*p));c.tgt.set(c.a.x,H*0.6,c.a.z);c.fov=34;}},
+  crane:{name:'搖臂',beats:[8,16],fn:(p,c)=>{const H=c.H,e=ez(p);dirPos(c,c.side*(-0.95+1.5*e),H*(3.0-0.8*e),H*(0.1+1.05*e));c.tgt.set(c.chest.x*0.5+c.a.x*0.5,H*0.55,c.chest.z*0.5+c.a.z*0.5);c.fov=32;}},
+  orbit:{name:'環繞',beats:[8,16],fn:(p,c)=>{const H=c.H;dirPos(c,c.side*(-0.7+2.1*p),H*2.1,H*(0.6+0.15*Math.sin(p*Math.PI)));c.tgt.set(c.chest.x*0.5+c.a.x*0.5,H*0.52,c.chest.z*0.5+c.a.z*0.5);c.fov=30;}},
+  truck:{name:'側移推軌',beats:[8,16],fn:(p,c)=>{const H=c.H;{const o=c.side*H*(-0.7+1.4*p),sn=Math.sin(c.fa),cs=Math.cos(c.fa);c.pos.set(c.a.x+cs*o+sn*H*2.3,H*0.55,c.a.z-sn*o+cs*H*2.3);}c.tgt.set(c.a.x,H*0.55,c.a.z);c.fov=30;}},
+};
+const STYLES={concert:{wide:3,medium:3,close:3.5,low:1.5,crane:1.5,orbit:1,truck:1},close:{close:6.6,medium:3,wide:1,low:1},orbit:{orbit:4,crane:2,wide:2,medium:2,close:1},wide:{wide:4,crane:2,truck:2,medium:1,orbit:1}};
+const LENS={auto:null,slow:[8,16],mid:[4,8],fast:[2,4]};
+function dirPick(){
+  const w=STYLES[DIR.style]||STYLES.concert;const ks=Object.keys(w).filter(k=>k!==DIR.last);let sum=0;ks.forEach(k=>sum+=w[k]);let r=Math.random()*sum;
+  for(const k of ks){r-=w[k];if(r<=0)return k;}return ks[0];
+}
+function dirStart(key,t){
+  const sh=SHOTS[key];DIR.n++;DIR.last=key;DIR.side=DIR.side>0?-1:1;if(Math.random()<0.3)DIR.side*=-1;
+  const L=LENS[DIR.len]||sh.beats;const nb=L[Math.random()<0.5?0:1]||L[0];
+  const per=dirPer();
+  DIR.shot={key,t0:t,tEnd:t+nb*per,side:DIR.side};
+  // 結束點對齊到拍：從目前時間往後數 nb 拍，吸附到最近的拍線
+  DIR.shot.tEnd=dirNextBeat(t+nb*per-0.5*per);if(DIR.shot.tEnd<t+per)DIR.shot.tEnd=t+per;
+  DIR.cutJump=true;dirInfo();
+}
+function dirInfo(){
+  const e=$('dirInfo');if(!e)return;
+  if(!DIR.on){e.textContent='關閉中。開啟後依音樂節拍自動切換鏡頭；拖曳或滾輪可暫時接手，停手 4 秒自動回到運鏡。';$('dirshot').style.display='none';return;}
+  const nm=DIR.shot?SHOTS[DIR.shot.key].name:'—';const bpm=DIR.beats?('｜約 '+DIR.bpm.toFixed(0)+' BPM'):(musicName?'｜分析節拍中…':'｜無音樂（固定節奏）');
+  e.textContent='鏡頭 '+DIR.n+'：'+nm+bpm+(DIR.held?'｜手動中':'');
+  const sh=$('dirshot');sh.style.display='';sh.textContent=nm+(DIR.held?'（手動）':'');
+}
+function dirSet(on){
+  on=!!on;if(on===DIR.on)return;DIR.on=on;$('dirOn').checked=on;$('dirpill').classList.toggle('on',on);
+  if(on){DIR.fov0=cam.fov;DIR.held=false;DIR.shot=null;DIR.blend={t:0,from:{pos:cam.position.clone(),tgt:ctl.target.clone(),fov:cam.fov}};dirAnalyse();if(vrm)dirMeasure();}
+  else{if(DIR.fov0){cam.fov=DIR.fov0;cam.updateProjectionMatrix();}ctl.target.copy(DIR.tgtS);ctl.update();}
+  dirInfo();dirSave();
+}
+function dirSave(){try{localStorage.setItem('vrmv_dir',JSON.stringify({style:DIR.style,len:DIR.len,shake:DIR.shake}));}catch(e){}}
+function dirFrame(dt){
+  if(!DIR.on||!vrm)return;
+  const now=performance.now();
+  const held=DIR.down||now<DIR.holdUntil;
+  if(held!==DIR.held){DIR.held=held;if(!held){DIR.blend={t:0,from:{pos:cam.position.clone(),tgt:ctl.target.clone(),fov:cam.fov}};}dirInfo();}
+  if(held)return;
+  if(aud.src&&aud.src!==DIR.an)dirAnalyse();
+  const t=dirNow();
+  if(!DIR.shot||DIR.force||(!DIR.freeze&&(t<DIR.tPrevT-0.5||t>=DIR.shot.tEnd))){const key=DIR.force||dirPick();DIR.force=null;dirStart(key,t);}
+  DIR.tPrevT=t;
+  const sh=DIR.shot,S=SHOTS[sh.key],H=DIR.H;
+  const c={H,fa:DIR.fa,a:DIR.anchor,side:sh.side,pos:DIR.pose.pos,tgt:DIR.pose.tgt,fov:30,chest:_v(),head:_v()};
+  dirBone('chest',c.chest);dirBone('head',c.head);
+  {const l=dirBone('leftUpperArm',_v()),r=dirBone('rightUpperArm',_v());const rx=r.x-l.x,rz=r.z-l.z;   // 面向 = 上 × 右（肩線在地面上的投影轉 90°）；彎腰、前傾時肩線仍穩定，不像軀幹朝向會朝下
+    if(Math.hypot(rx,rz)>0.08){const ang=Math.atan2(rz,-rx);let d=ang-DIR.fa;d-=Math.round(d/(2*Math.PI))*2*Math.PI;DIR.fa+=d*(DIR.cutJump?1:1-Math.exp(-dt/1.0));}}
+  c.fa=DIR.fa;
+  const hp=dirBone('hips',_v());const k=DIR.cutJump?1:1-Math.exp(-dt/0.9);DIR.anchor.x+=(hp.x-DIR.anchor.x)*k;DIR.anchor.z+=(hp.z-DIR.anchor.z)*k;
+  const span=Math.max(0.5,sh.tEnd-sh.t0);const p=Math.min(1,Math.max(0,(t-sh.t0)/span));
+  S.fn(p,c);
+  // 目標點低通（追蹤頭／手時不要太跳）；切鏡頭那一幀直接對齊
+  const tk=DIR.cutJump?1:1-Math.exp(-dt/0.10);DIR.tgtS.lerp(c.tgt,tk);DIR.cutJump=false;
+  const pos=c.pos.clone(),tgt=DIR.tgtS.clone();
+  // 手持晃動：低頻多正弦噪音，位置 ±1.2% 身高、視線偏移 ±0.8%
+  const A=DIR.shake;if(A>0){const T=now/1000;const nz=(f,s)=>Math.sin(T*f+s)*0.5+Math.sin(T*f*2.3+s*1.7)*0.3+Math.sin(T*f*4.1+s*2.9)*0.2;
+    pos.x+=nz(0.9,1)*H*0.012*A;pos.y+=nz(1.1,2)*H*0.009*A;pos.z+=nz(0.8,3)*H*0.012*A;tgt.x+=nz(1.3,4)*H*0.008*A;tgt.y+=nz(1.0,5)*H*0.008*A;}
+  let fov=c.fov;
+  if(DIR.blend){DIR.blend.t+=dt;const b=ez(Math.min(1,DIR.blend.t/0.7));const f=DIR.blend.from;pos.lerpVectors(f.pos,pos,b);tgt.lerpVectors(f.tgt,tgt,b);fov=f.fov+(fov-f.fov)*b;if(DIR.blend.t>=0.7)DIR.blend=null;}
+  cam.position.copy(pos);cam.lookAt(tgt);ctl.target.copy(tgt);if(Math.abs(cam.fov-fov)>0.01){cam.fov=fov;cam.updateProjectionMatrix();}
+}
+// ---- UI
+$('dirOn').onchange=()=>dirSet($('dirOn').checked);$('dirpill').onclick=()=>dirSet(!DIR.on);
+const dirNextShot=()=>{if(!DIR.on)dirSet(true);else{DIR.holdUntil=0;DIR.down=false;DIR.shot=null;}};
+$('dirNext').onclick=dirNextShot;
+$('dirStyle').onchange=()=>{DIR.style=$('dirStyle').value;DIR.shot=null;dirSave();};$('dirLen').onchange=()=>{DIR.len=$('dirLen').value;DIR.shot=null;dirSave();};
+$('dirShake').oninput=()=>{DIR.shake=+$('dirShake').value/100;$('dirShakeV').textContent=$('dirShake').value;dirSave();};
+try{const sv=JSON.parse(localStorage.getItem('vrmv_dir')||'{}');if(sv.style&&STYLES[sv.style]){DIR.style=sv.style;$('dirStyle').value=sv.style;}if(sv.len&&sv.len in LENS){DIR.len=sv.len;$('dirLen').value=sv.len;}if(typeof sv.shake==='number'){DIR.shake=sv.shake;$('dirShake').value=Math.round(sv.shake*100);$('dirShakeV').textContent=Math.round(sv.shake*100);}}catch(e){}
+cv.addEventListener('pointerdown',()=>{if(DIR.on)DIR.down=true;},true);
+const dirUp=()=>{if(DIR.down){DIR.down=false;DIR.holdUntil=performance.now()+4000;}};addEventListener('pointerup',dirUp,true);addEventListener('pointercancel',dirUp,true);
+cv.addEventListener('wheel',()=>{if(DIR.on)DIR.holdUntil=performance.now()+4000;},{passive:true,capture:true});
+addEventListener('keydown',e=>{if(e.ctrlKey||e.metaKey||e.altKey||/^(INPUT|TEXTAREA|SELECT)$/.test((e.target.tagName||'')))return;if(e.key==='c'||e.key==='C')dirSet(!DIR.on);else if(e.key==='n'||e.key==='N')dirNextShot();});
+window.__dirForce=k=>{if(!DIR.on)dirSet(true);DIR.holdUntil=0;DIR.down=false;DIR.force=k;};
 // ---------- loop
 const clock=new THREE.Clock();
 function tick(){requestAnimationFrame(tick);frame();}
 function frame(){
   const dt=Math.min(clock.getDelta(),1/20);
   syncMusic(dt);
+  if(playing&&vrm&&motionFinished()){playing=false;$('play').textContent='播放';}
   if(vrm){
     if(mixer&&action){
       if(playing)mixer.update(audioDrive?0:dt*(+$('speed').value));
@@ -1537,7 +1665,7 @@ function frame(){
   }
   handTrail.update(playing?dt:0,cam,!!($('handTrail')&&$('handTrail').checked),vrm,cv.clientHeight||600);
   {const tt=performance.now()/1000;for(const b of Object.values(BD))if(b.active)b.update(tt);}
-  ctl.update();renderer.render(scene,cam);
+  dirFrame(dt);if(!(DIR.on&&!DIR.held))ctl.update();renderer.render(scene,cam);
 }
 
 // ---------- 點選檢查：點模型 -> 列出命中的網格／三角面／材質／UV；可隱藏三角面、單獨關網格或外框線
