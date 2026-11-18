@@ -45,7 +45,7 @@ body.nosd #side{display:none}
 #sidebtn:hover,#sidebtn:focus-visible{opacity:1}
 </style>
 <div id="side">
-  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.8.4</span></h1>
+  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.8.6</span></h1>
   <div class="sub">在瀏覽器裡檢視 VRM 模型、播放 VRMA 動作、擺姿勢、調表情、換背景、配音樂。檔案只在你的瀏覽器內讀取，不會上傳。</div>
 
 
@@ -89,12 +89,11 @@ body.nosd #side{display:none}
   <div id="lightUI"></div>
 
   <h2>畫面</h2>
-  <div class="row"><label class="chk"><input type="checkbox" id="grid" checked>地板格線</label><label class="chk"><input type="checkbox" id="skel">骨架</label><label class="chk"><input type="checkbox" id="wire">線框</label></div>
-  <div class="row"><label class="chk"><input type="checkbox" id="handTrail">手部拖尾特效</label></div>
-  <div class="row"><label class="chk"><input type="checkbox" id="rot">自動旋轉</label><span class="grow"></span><span class="sub">背景</span>
-    <select id="bg"><option value="#2b2e36">深灰</option><option value="#8f95a3">中灰</option><option value="#f2f2f2">白</option><option value="#00b140">綠幕</option><option value="#101216">黑</option><option value="stage">演唱會舞台</option><option value="studio">攝影棚</option><option value="sakura">櫻花庭園</option><option value="cyber">賽博雨夜</option><option value="aurora">星空極光</option></select></div>
-  <div class="row" id="stageRow" style="display:none"><span class="sub">背景配色</span><select id="stageTheme"><option value="pinkblue">粉藍</option><option value="redgold">紅金</option><option value="purplegreen">紫綠</option></select><label class="chk"><input type="checkbox" id="stageLight" checked>場景光色（彩色逆光）</label></div>
-  <div class="row"><button data-v="front">正面</button><button data-v="side">側面</button><button data-v="back">背面</button><button data-v="top">俯視</button><button id="fit">取景</button></div>
+  <div class="row g3"><label class="chk"><input type="checkbox" id="grid" checked>地板格線</label><label class="chk"><input type="checkbox" id="skel">骨架</label><label class="chk"><input type="checkbox" id="wire">線框</label><label class="chk" style="grid-column:span 2;white-space:nowrap"><input type="checkbox" id="handTrail">手部拖尾特效</label><label class="chk"><input type="checkbox" id="rot">自動旋轉</label></div>
+  <div class="row gl"><span class="sub">背景</span><select id="bg"><option value="solid">純色背景</option><option value="stage">演唱會舞台</option><option value="studio">攝影棚</option><option value="sakura">櫻花庭園</option><option value="cyber">賽博雨夜</option><option value="aurora">星空極光</option></select>
+    <span class="sub" id="stageLbl" style="display:none">配色</span><select id="stageTheme" style="display:none"><option value="pinkblue">粉藍</option><option value="redgold">紅金</option><option value="purplegreen">紫綠</option></select>
+    <span id="stageLightWrap" style="display:none;grid-column:2"><label class="chk"><input type="checkbox" id="stageLight" checked>場景光色（彩色逆光）</label></span></div>
+  <div class="row g3"><button data-v="front">正面</button><button data-v="side">側面</button><button data-v="back">背面</button><button data-v="top">俯視</button><button id="fit">取景</button></div>
 
   <h2>檢查</h2>
   <div class="row"><label class="chk"><input type="checkbox" id="pickOn">點選模式（在畫面上點一下，列出該點的所有三角面）</label></div>
@@ -1169,7 +1168,7 @@ return {createStudio,createSakura,createCyber,createAurora};
 // ---------- scene
 const cv=$('cv');const renderer=new THREE.WebGLRenderer({canvas:cv,antialias:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
-const scene=new THREE.Scene();scene.background=new THREE.Color($('bg').value);
+const scene=new THREE.Scene();scene.background=new THREE.Color('#2b2e36');
 const cam=new THREE.PerspectiveCamera(30,1,0.05,100);cam.position.set(0,1.2,5);
 const ctl=new OrbitControls(cam,cv);ctl.target.set(0,1,0);ctl.enableDamping=true;ctl.dampingFactor=0.12;window.__ctl=ctl;window.__cam=cam;
 // 光源：主光 lKey、補光 lFill、輪廓光 lRim、環境光 lAmb（參數與面板在「光影」區塊）
@@ -1390,16 +1389,16 @@ function exprTick(dt){
 // ---------- lighting & rendering（光影）
 const TONES=[['無（預設）',THREE.NoToneMapping],['Linear',THREE.LinearToneMapping],['Reinhard',THREE.ReinhardToneMapping],['Cineon',THREE.CineonToneMapping],['ACES Filmic',THREE.ACESFilmicToneMapping],['AgX',THREE.AgXToneMapping],['Neutral',THREE.NeutralToneMapping]];
 const LP={ // 預設組合：key/fill/rim 強度、主光方位(0=正面,+向角色左)與仰角、環境光、陰影、曝光
- '預設（柔和斜光）':{k:2.6,az:27,el:42,fill:0,rim:0,amb:0.7,shadow:false,expo:1},
- '正面柔光':{k:1.8,az:0,el:20,fill:0.6,rim:0,amb:1.0,shadow:false,expo:1},
+ '預設（柔和斜光）':{k:2.6,az:27,el:42,fill:0,rim:0,amb:0.7,shadow:true,expo:1},
+ '正面柔光':{k:1.8,az:0,el:20,fill:0.6,rim:0,amb:1.0,shadow:true,expo:1},
  '側光（戲劇）':{k:3.2,az:80,el:25,fill:0.15,rim:0,amb:0.25,shadow:true,expo:1},
- '逆光（輪廓）':{k:1.2,az:20,el:30,fill:0.2,rim:3.0,amb:0.5,shadow:false,expo:1},
+ '逆光（輪廓）':{k:1.2,az:20,el:30,fill:0.2,rim:3.0,amb:0.5,shadow:true,expo:1},
  '頂光':{k:3.0,az:0,el:80,fill:0,rim:0,amb:0.4,shadow:true,expo:1},
  'MateEngine 對照（正面平行光）':{k:2.1,az:0,el:0,fill:0,rim:0,amb:1.8,shadow:false,expo:1,col:'#ffffff',ambCol:'#ffffff'},
  '三點打光（攝影棚）':{k:2.4,az:40,el:35,fill:0.9,rim:1.6,amb:0.35,shadow:true,expo:1},
  '平光（只看顏色）':{k:0,az:0,el:0,fill:0,rim:0,amb:2.4,shadow:false,expo:1},
 };
-const LS={k:2.6,az:27,el:42,col:'#ffffff',ambCol:'#ffffff',fill:0,rim:0,amb:0.7,expo:1,tone:0,shadow:false,soft:2,outline:true,outW:1,fov:30,res:1,debug:'none'};
+const LS={k:2.6,az:27,el:42,col:'#ffffff',ambCol:'#ffffff',fill:0,rim:0,amb:0.7,expo:1,tone:0,shadow:true,soft:2,outline:true,outW:1,fov:30,res:1,debug:'none'};
 const LCTL=[ // [key, label, min, max, step]
  ['k','主光強度',0,5,0.05],['az','主光方位（0＝正面）',-180,180,1],['el','主光仰角',-10,90,1],['fill','補光強度（主光對側）',0,3,0.05],['rim','輪廓光強度（背後）',0,4,0.05],['amb','環境光',0,3,0.05],
  ['expo','曝光',0.2,3,0.05],['soft','陰影柔和度',0,8,0.5],['outW','輪廓線粗細（倍率）',0,4,0.05],['fov','視角 FOV',15,70,1]];
@@ -1467,15 +1466,17 @@ function applyDisplay(){
 }
 for(const id of['col','skel','grid','wire'])$(id).onchange=applyDisplay;
 $('rot').onchange=()=>{ctl.autoRotate=$('rot').checked;ctl.autoRotateSpeed=2;};
+const SOLID=[['#2b2e36','深灰'],['#8f95a3','中灰'],['#f2f2f2','白'],['#00b140','綠幕'],['#101216','黑']];
 function fillThemes(bd){const sel=$('stageTheme');sel.innerHTML='';for(const [k,v] of Object.entries(bd.themes)){const o=document.createElement('option');o.value=k;o.textContent=v.name;sel.appendChild(o);}sel.value=bd.theme;}
 function applyBg(){
   const v=$('bg').value;for(const [k,bd] of Object.entries(BD)){if(k!==v&&bd.active)bd.setEnabled(false);}
   const cur=BD[v];
-  if(cur){cur.setEnabled(true);fillThemes(cur);cur.setTheme(cur.theme);cur.setLights($('stageLight').checked);$('stageRow').style.display='';$('stageLight').parentElement.style.display=cur.hasLights?'':'none';}
-  else{$('stageRow').style.display='none';scene.background=new THREE.Color(v);}
+  if(cur){cur.setEnabled(true);fillThemes(cur);cur.setTheme(cur.theme);cur.setLights($('stageLight').checked);$('stageLbl').style.display=$('stageTheme').style.display='';$('stageLightWrap').style.display=cur.hasLights?'':'none';}
+  else{const sel=$('stageTheme');sel.innerHTML='';for(const [c,n] of SOLID){const o=document.createElement('option');o.value=c;o.textContent=n;sel.appendChild(o);}sel.value=localStorage.getItem('solidBg')||SOLID[0][0];if(sel.value!==(localStorage.getItem('solidBg')||SOLID[0][0]))sel.value=SOLID[0][0];$('stageLbl').style.display=$('stageTheme').style.display='';$('stageLightWrap').style.display='none';scene.background=new THREE.Color(sel.value);}
   applyDisplay();
 }
-$('bg').onchange=applyBg;$('stageTheme').onchange=()=>{const bd=BD[$('bg').value];if(bd)bd.setTheme($('stageTheme').value);};$('stageLight').onchange=()=>{const bd=BD[$('bg').value];if(bd)bd.setLights($('stageLight').checked);};
+$('bg').onchange=applyBg;$('stageTheme').onchange=()=>{const bd=BD[$('bg').value];if(bd)bd.setTheme($('stageTheme').value);else{try{localStorage.setItem('solidBg',$('stageTheme').value);}catch(e){}scene.background=new THREE.Color($('stageTheme').value);}};$('stageLight').onchange=()=>{const bd=BD[$('bg').value];if(bd)bd.setLights($('stageLight').checked);};
+try{applyBg();}catch(e){console.error(e);}
 function fitView(){
   if(!vrm)return;const b=new THREE.Box3().setFromObject(vrm.scene);const c=b.getCenter(new THREE.Vector3()),s=b.getSize(new THREE.Vector3());
   const h=Math.max(s.y,0.5);const d=(h*0.62)/Math.tan(THREE.MathUtils.degToRad(cam.fov/2))+s.z;ctl.target.set(0,c.y,0);cam.position.set(0,c.y,d);ctl.update();
