@@ -46,7 +46,7 @@ body.nosd #side{display:none}
 #dirpill{position:absolute;top:10px;right:12px;z-index:5;height:34px;padding:0 12px;border-radius:8px;border:1px solid var(--line);background:color-mix(in srgb,var(--panel) 82%,transparent);color:var(--fg);font-size:13px;cursor:pointer;opacity:.75}#dirpill:hover{opacity:1}#dirpill.on{background:var(--acc);color:#fff;border-color:var(--acc);opacity:1}#dirshot{position:absolute;top:50px;right:14px;z-index:5;font-size:12px;color:#fff;background:rgba(0,0,0,.55);padding:2px 8px;border-radius:6px;pointer-events:none;display:none}
 </style>
 <div id="side">
-  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.9.1</span></h1>
+  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.9.2</span></h1>
   <div class="sub">在瀏覽器裡檢視 VRM 模型、播放 VRMA 動作、擺姿勢、調表情、換背景、配音樂。檔案只在你的瀏覽器內讀取，不會上傳。</div>
 
 
@@ -1533,7 +1533,7 @@ function wingGuard(dt){
   }
 }
 window.__wingGuard=wingGuard;
-// ---------- 導播運鏡（演唱會轉播風格）：固定機位（全景／中景／臉特寫／低角／高角）依節拍切換，鏡頭內不轉動，依音樂節拍切換，疊加手持晃動
+// ---------- 導播運鏡（演唱會轉播風格）：固定機位（全景／高角全景／中景／臉特寫）依節拍切換，鏡頭內不轉動，依音樂節拍切換，疊加手持晃動
 const DIR={on:false,held:false,down:false,holdUntil:0,style:'concert',len:'auto',shake:0.2,H:1.6,n:0,shot:null,side:1,last:'',
   beats:null,bpm:0,period:0.5,phase:0,an:'',tgtS:new THREE.Vector3(),anchor:new THREE.Vector3(),fov0:null,blend:null,pose:{pos:new THREE.Vector3(),tgt:new THREE.Vector3()},tPrevT:0,force:null,cutJump:true,fa:0};
 window.__dir=DIR;
@@ -1564,7 +1564,7 @@ function dirNow(){return(musicName&&aud.readyState>=2&&!aud.paused)?aud.currentT
 const dirPer=()=>DIR.beats?DIR.period:0.5, dirPh=()=>DIR.beats?DIR.phase:0;
 function dirNextBeat(t){const per=dirPer(),ph=dirPh();return ph+Math.ceil((t-ph)/per-1e-6)*per;}
 // ---- 機位庫（真實演唱會轉播的做法）：每個鏡頭是一台「固定機位」，位置在這個鏡頭期間完全不動，只有攝影師跟著人物小幅搖攝、用變焦維持構圖大小。
-// 大小（全景／中景／臉特寫／低角／高角）各有幾個不同的拍攝角度（az，相對角色正面，+ 是角色左側…依畫面；0=正前方），切鏡頭時換大小也換角度，避免跳接。
+// 大小（全景／高角全景／中景／臉特寫）各有幾個不同的拍攝角度（az，相對角色正面，+ 是角色左側…依畫面；0=正前方），切鏡頭時換大小也換角度，避免跳接。
 // SHOTS 欄位：fh 構圖高度（身高倍數，用 fov 反推）、dist 機位距離（身高倍數）、ch 機位高度（身高倍數）、aim 瞄準點（body/chest/head）、azs 可選角度、beats 持續拍數。
 const ez=p=>p*p*(3-2*p);
 const SHOTS={
@@ -1572,9 +1572,8 @@ const SHOTS={
   high:{name:'高角全景',fh:1.5,dist:3.3,ch:1.45,aim:'body',azs:[0,0.55,-0.55],beats:[8,16]},
   medium:{name:'中景',fh:0.75,dist:2.3,ch:0.68,aim:'chest',azs:[0,0.4,-0.4,0.75,-0.75],beats:[4,8]},
   close:{name:'臉部特寫',fh:0.36,dist:1.5,ch:0.97,aim:'head',azs:[0,0.28,-0.28,0.5,-0.5],beats:[4,8]},
-  low:{name:'低角仰拍',fh:1.15,dist:2.5,ch:0.1,aim:'body',azs:[0,0.4,-0.4],beats:[4,8]},
 };
-const STYLES={concert:{wide:2.5,medium:3,close:3,low:1,high:1},close:{close:6,medium:3,wide:1,low:0.5},wide:{wide:4,high:2,medium:1.5,low:1}};
+const STYLES={concert:{wide:2.5,medium:3,close:3,high:1},close:{close:6,medium:3,wide:1},wide:{wide:4,high:2,medium:1.5}};
 const LENS={auto:null,slow:[8,16],mid:[4,8],fast:[2,4]};
 function dirPick(){
   const w=STYLES[DIR.style]||STYLES.concert;const ks=Object.keys(w).filter(k=>k!==DIR.last);let sum=0;ks.forEach(k=>sum+=w[k]);let r=Math.random()*sum;
