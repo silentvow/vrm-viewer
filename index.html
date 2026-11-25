@@ -46,7 +46,7 @@ body.nosd #side{display:none}
 #dirpill{position:absolute;top:10px;right:12px;z-index:5;height:34px;padding:0 12px;border-radius:8px;border:1px solid var(--line);background:color-mix(in srgb,var(--panel) 82%,transparent);color:var(--fg);font-size:13px;cursor:pointer;opacity:.75}#dirpill:hover{opacity:1}#dirpill.on{background:var(--acc);color:#fff;border-color:var(--acc);opacity:1}#dirshot{position:absolute;top:50px;right:14px;z-index:5;font-size:12px;color:#fff;background:rgba(0,0,0,.55);padding:2px 8px;border-radius:6px;pointer-events:none;display:none}
 </style>
 <div id="side">
-  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.9.0</span></h1>
+  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.9.1</span></h1>
   <div class="sub">在瀏覽器裡檢視 VRM 模型、播放 VRMA 動作、擺姿勢、調表情、換背景、配音樂。檔案只在你的瀏覽器內讀取，不會上傳。</div>
 
 
@@ -73,9 +73,9 @@ body.nosd #side{display:none}
 
   <h2>運鏡</h2>
   <div class="row"><label class="chk"><input type="checkbox" id="dirOn">導播運鏡（C）</label><span class="grow"></span><button id="dirNext" title="換下一個鏡頭（N）">下一鏡頭</button></div>
-  <div class="row gl"><span class="sub">風格</span><select id="dirStyle"><option value="concert">演唱會全場</option><option value="close">特寫為主</option><option value="orbit">慢歌環繞</option><option value="wide">全景為主</option></select>
+  <div class="row gl"><span class="sub">風格</span><select id="dirStyle"><option value="concert">演唱會全場</option><option value="close">特寫為主</option><option value="wide">全景為主</option></select>
     <span class="sub">切換</span><select id="dirLen"><option value="auto">跟節拍（自動）</option><option value="slow">慢（長鏡頭）</option><option value="mid">中</option><option value="fast">快（密集切換）</option></select>
-    <span class="sub">手持晃動</span><span style="display:flex;gap:8px;align-items:center"><input id="dirShake" class="grow" type="range" min="0" max="100" value="35"><span id="dirShakeV" class="sub" style="min-width:2.4em;text-align:right">35</span></span></div>
+    <span class="sub">手持晃動</span><span style="display:flex;gap:8px;align-items:center"><input id="dirShake" class="grow" type="range" min="0" max="100" value="20"><span id="dirShakeV" class="sub" style="min-width:2.4em;text-align:right">20</span></span></div>
   <div class="sub" id="dirInfo">關閉中。開啟後依音樂節拍自動切換鏡頭；拖曳或滾輪可暫時接手，停手 4 秒自動回到運鏡。</div>
 
   <h2>姿勢</h2>
@@ -1533,8 +1533,8 @@ function wingGuard(dt){
   }
 }
 window.__wingGuard=wingGuard;
-// ---------- 導播運鏡（演唱會藍光風格）：多機位切換＋搖臂／環繞／推軌／低角／特寫／手腳插入，依音樂節拍切換，疊加手持晃動
-const DIR={on:false,held:false,down:false,holdUntil:0,style:'concert',len:'auto',shake:0.35,H:1.6,n:0,shot:null,side:1,last:'',
+// ---------- 導播運鏡（演唱會轉播風格）：固定機位（全景／中景／臉特寫／低角／高角）依節拍切換，鏡頭內不轉動，依音樂節拍切換，疊加手持晃動
+const DIR={on:false,held:false,down:false,holdUntil:0,style:'concert',len:'auto',shake:0.2,H:1.6,n:0,shot:null,side:1,last:'',
   beats:null,bpm:0,period:0.5,phase:0,an:'',tgtS:new THREE.Vector3(),anchor:new THREE.Vector3(),fov0:null,blend:null,pose:{pos:new THREE.Vector3(),tgt:new THREE.Vector3()},tPrevT:0,force:null,cutJump:true,fa:0};
 window.__dir=DIR;
 const _v=()=>new THREE.Vector3(),_q=()=>new THREE.Quaternion();
@@ -1563,29 +1563,31 @@ async function dirAnalyse(){
 function dirNow(){return(musicName&&aud.readyState>=2&&!aud.paused)?aud.currentTime:performance.now()/1000;}
 const dirPer=()=>DIR.beats?DIR.period:0.5, dirPh=()=>DIR.beats?DIR.phase:0;
 function dirNextBeat(t){const per=dirPer(),ph=dirPh();return ph+Math.ceil((t-ph)/per-1e-6)*per;}
-// ---- 鏡頭庫。fn(p,c)：p=0..1 進度；c={H 身高,a 舞台跟隨點,side ±1,chest/head/hand/foot 骨骼位置,pos/tgt/fov 輸出}。az 以 +Z 為正面。
+// ---- 機位庫（真實演唱會轉播的做法）：每個鏡頭是一台「固定機位」，位置在這個鏡頭期間完全不動，只有攝影師跟著人物小幅搖攝、用變焦維持構圖大小。
+// 大小（全景／中景／臉特寫／低角／高角）各有幾個不同的拍攝角度（az，相對角色正面，+ 是角色左側…依畫面；0=正前方），切鏡頭時換大小也換角度，避免跳接。
+// SHOTS 欄位：fh 構圖高度（身高倍數，用 fov 反推）、dist 機位距離（身高倍數）、ch 機位高度（身高倍數）、aim 瞄準點（body/chest/head）、azs 可選角度、beats 持續拍數。
 const ez=p=>p*p*(3-2*p);
-function dirPos(c,az,dist,h){az+=c.fa;return c.pos.set(c.a.x+Math.sin(az)*dist,h,c.a.z+Math.cos(az)*dist);}   // az 相對於角色目前面向（fa）
 const SHOTS={
-  wide:{name:'全景',beats:[8,16],fn:(p,c)=>{const H=c.H;dirPos(c,c.side*(0.2+0.15*p),H*(3.6-0.4*p),H*0.55);c.tgt.set(c.a.x,H*0.5,c.a.z);c.fov=30;}},
-  medium:{name:'中景',beats:[4,8],fn:(p,c)=>{const H=c.H;dirPos(c,c.side*(0.25-0.1*p),H*(1.95-0.4*p),H*0.62);c.tgt.set(c.a.x*0.4+c.chest.x*0.6,c.chest.y,c.a.z*0.4+c.chest.z*0.6);c.fov=30;}},
-  close:{name:'臉部特寫',beats:[4,8],fn:(p,c)=>{const H=c.H,az=c.side*0.3,d=H*(0.95-0.1*p);c.tgt.set(c.head.x,c.head.y-H*0.015,c.head.z);c.pos.set(c.head.x+Math.sin(az+c.fa)*d,c.head.y+H*0.01,c.head.z+Math.cos(az+c.fa)*d);c.fov=26;}},
-  low:{name:'低角仰拍',beats:[4,8],fn:(p,c)=>{const H=c.H;dirPos(c,c.side*(0.35-0.2*p),H*(2.2-0.35*p),H*(0.08+0.1*p));c.tgt.set(c.a.x,H*0.6,c.a.z);c.fov=34;}},
-  crane:{name:'搖臂',beats:[8,16],fn:(p,c)=>{const H=c.H,e=ez(p);dirPos(c,c.side*(-0.95+1.5*e),H*(3.0-0.8*e),H*(0.1+1.05*e));c.tgt.set(c.chest.x*0.5+c.a.x*0.5,H*0.55,c.chest.z*0.5+c.a.z*0.5);c.fov=32;}},
-  orbit:{name:'環繞',beats:[8,16],fn:(p,c)=>{const H=c.H;dirPos(c,c.side*(-0.7+2.1*p),H*2.1,H*(0.6+0.15*Math.sin(p*Math.PI)));c.tgt.set(c.chest.x*0.5+c.a.x*0.5,H*0.52,c.chest.z*0.5+c.a.z*0.5);c.fov=30;}},
-  truck:{name:'側移推軌',beats:[8,16],fn:(p,c)=>{const H=c.H;{const o=c.side*H*(-0.7+1.4*p),sn=Math.sin(c.fa),cs=Math.cos(c.fa);c.pos.set(c.a.x+cs*o+sn*H*2.3,H*0.55,c.a.z-sn*o+cs*H*2.3);}c.tgt.set(c.a.x,H*0.55,c.a.z);c.fov=30;}},
+  wide:{name:'全景',fh:1.5,dist:3.6,ch:0.6,aim:'body',azs:[0,0.5,-0.5,0.95,-0.95],beats:[8,16]},
+  high:{name:'高角全景',fh:1.5,dist:3.3,ch:1.45,aim:'body',azs:[0,0.55,-0.55],beats:[8,16]},
+  medium:{name:'中景',fh:0.75,dist:2.3,ch:0.68,aim:'chest',azs:[0,0.4,-0.4,0.75,-0.75],beats:[4,8]},
+  close:{name:'臉部特寫',fh:0.36,dist:1.5,ch:0.97,aim:'head',azs:[0,0.28,-0.28,0.5,-0.5],beats:[4,8]},
+  low:{name:'低角仰拍',fh:1.15,dist:2.5,ch:0.1,aim:'body',azs:[0,0.4,-0.4],beats:[4,8]},
 };
-const STYLES={concert:{wide:3,medium:3,close:3.5,low:1.5,crane:1.5,orbit:1,truck:1},close:{close:6.6,medium:3,wide:1,low:1},orbit:{orbit:4,crane:2,wide:2,medium:2,close:1},wide:{wide:4,crane:2,truck:2,medium:1,orbit:1}};
+const STYLES={concert:{wide:2.5,medium:3,close:3,low:1,high:1},close:{close:6,medium:3,wide:1,low:0.5},wide:{wide:4,high:2,medium:1.5,low:1}};
 const LENS={auto:null,slow:[8,16],mid:[4,8],fast:[2,4]};
 function dirPick(){
   const w=STYLES[DIR.style]||STYLES.concert;const ks=Object.keys(w).filter(k=>k!==DIR.last);let sum=0;ks.forEach(k=>sum+=w[k]);let r=Math.random()*sum;
   for(const k of ks){r-=w[k];if(r<=0)return k;}return ks[0];
 }
 function dirStart(key,t){
-  const sh=SHOTS[key];DIR.n++;DIR.last=key;DIR.side=DIR.side>0?-1:1;if(Math.random()<0.3)DIR.side*=-1;
+  const sh=SHOTS[key];DIR.n++;
+  // 角度：不和上一個鏡頭太像（同角度又同大小就是跳接）；換大小時角度也盡量換
+  let az=0,tries=0;do{az=sh.azs[Math.floor(Math.random()*sh.azs.length)];tries++;}while(tries<8&&DIR.lastAz!=null&&Math.abs(az-DIR.lastAz)<0.3&&sh.azs.length>1);
+  DIR.last=key;DIR.lastAz=az;
   const L=LENS[DIR.len]||sh.beats;const nb=L[Math.random()<0.5?0:1]||L[0];
   const per=dirPer();
-  DIR.shot={key,t0:t,tEnd:t+nb*per,side:DIR.side};
+  DIR.shot={key,t0:t,tEnd:t,az,pos:null};
   // 結束點對齊到拍：從目前時間往後數 nb 拍，吸附到最近的拍線
   DIR.shot.tEnd=dirNextBeat(t+nb*per-0.5*per);if(DIR.shot.tEnd<t+per)DIR.shot.tEnd=t+per;
   DIR.cutJump=true;dirInfo();
@@ -1621,10 +1623,14 @@ function dirFrame(dt){
     if(Math.hypot(rx,rz)>0.08){const ang=Math.atan2(rz,-rx);let d=ang-DIR.fa;d-=Math.round(d/(2*Math.PI))*2*Math.PI;DIR.fa+=d*(DIR.cutJump?1:1-Math.exp(-dt/1.0));}}
   c.fa=DIR.fa;
   const hp=dirBone('hips',_v());const k=DIR.cutJump?1:1-Math.exp(-dt/0.9);DIR.anchor.x+=(hp.x-DIR.anchor.x)*k;DIR.anchor.z+=(hp.z-DIR.anchor.z)*k;
-  const span=Math.max(0.5,sh.tEnd-sh.t0);const p=Math.min(1,Math.max(0,(t-sh.t0)/span));
-  S.fn(p,c);
-  // 目標點低通（追蹤頭／手時不要太跳）；切鏡頭那一幀直接對齊
-  const tk=DIR.cutJump?1:1-Math.exp(-dt/0.10);DIR.tgtS.lerp(c.tgt,tk);DIR.cutJump=false;
+  // 固定機位：第一幀算出位置後整個鏡頭都不再動（位置相對舞台固定，角色走動時由攝影師搖攝＋變焦跟上）
+  if(!sh.pos){const d=H*S.dist,az=sh.az+DIR.fa;sh.pos=new THREE.Vector3(DIR.anchor.x+Math.sin(az)*d,H*S.ch,DIR.anchor.z+Math.cos(az)*d);}
+  const aim=S.aim==='head'?c.head:S.aim==='chest'?c.chest:null;
+  if(aim)c.tgt.set(aim.x,aim.y-(S.aim==='head'?H*0.015:0),aim.z);else c.tgt.set(DIR.anchor.x,H*0.5,DIR.anchor.z);
+  c.pos.copy(sh.pos);
+  // 目標點低通：像攝影師手動跟拍，不貼死；切鏡頭那一幀直接對齊
+  const tk=DIR.cutJump?1:1-Math.exp(-dt/0.28);DIR.tgtS.lerp(c.tgt,tk);DIR.cutJump=false;
+  {const dd=sh.pos.distanceTo(DIR.tgtS);c.fov=Math.min(50,Math.max(6,2*Math.atan(H*S.fh/2/Math.max(0.3,dd))*180/Math.PI));}
   const pos=c.pos.clone(),tgt=DIR.tgtS.clone();
   // 手持晃動：低頻多正弦噪音，位置 ±1.2% 身高、視線偏移 ±0.8%
   const A=DIR.shake;if(A>0){const T=now/1000;const nz=(f,s)=>Math.sin(T*f+s)*0.5+Math.sin(T*f*2.3+s*1.7)*0.3+Math.sin(T*f*4.1+s*2.9)*0.2;
