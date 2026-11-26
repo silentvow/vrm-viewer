@@ -46,7 +46,7 @@ body.nosd #side{display:none}
 #dirpill{position:absolute;top:10px;right:12px;z-index:5;height:34px;padding:0 12px;border-radius:8px;border:1px solid var(--line);background:color-mix(in srgb,var(--panel) 82%,transparent);color:var(--fg);font-size:13px;cursor:pointer;opacity:.75}#dirpill:hover{opacity:1}#dirpill.on{background:var(--acc);color:#fff;border-color:var(--acc);opacity:1}#dirshot{position:absolute;top:50px;right:14px;z-index:5;font-size:12px;color:#fff;background:rgba(0,0,0,.55);padding:2px 8px;border-radius:6px;pointer-events:none;display:none}
 </style>
 <div id="side">
-  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.9.2</span></h1>
+  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.9.3</span></h1>
   <div class="sub">在瀏覽器裡檢視 VRM 模型、播放 VRMA 動作、擺姿勢、調表情、換背景、配音樂。檔案只在你的瀏覽器內讀取，不會上傳。</div>
 
 
@@ -1570,8 +1570,8 @@ const ez=p=>p*p*(3-2*p);
 const SHOTS={
   wide:{name:'全景',fh:1.5,dist:3.6,ch:0.6,aim:'body',azs:[0,0.5,-0.5,0.95,-0.95],beats:[8,16]},
   high:{name:'高角全景',fh:1.5,dist:3.3,ch:1.45,aim:'body',azs:[0,0.55,-0.55],beats:[8,16]},
-  medium:{name:'中景',fh:0.75,dist:2.3,ch:0.68,aim:'chest',azs:[0,0.4,-0.4,0.75,-0.75],beats:[4,8]},
-  close:{name:'臉部特寫',fh:0.36,dist:1.5,ch:0.97,aim:'head',azs:[0,0.28,-0.28,0.5,-0.5],beats:[4,8]},
+  medium:{name:'中景',fh:0.88,dist:2.3,ch:0.68,aim:'chest',azs:[0,0.4,-0.4,0.75,-0.75],beats:[4,8]},
+  close:{name:'臉部特寫',fh:0.5,dist:1.5,ch:0.97,aim:'head',azs:[0,0.28,-0.28,0.5,-0.5],beats:[4,8]},
 };
 const STYLES={concert:{wide:2.5,medium:3,close:3,high:1},close:{close:6,medium:3,wide:1},wide:{wide:4,high:2,medium:1.5}};
 const LENS={auto:null,slow:[8,16],mid:[4,8],fast:[2,4]};
@@ -1624,8 +1624,8 @@ function dirFrame(dt){
   const hp=dirBone('hips',_v());const k=DIR.cutJump?1:1-Math.exp(-dt/0.9);DIR.anchor.x+=(hp.x-DIR.anchor.x)*k;DIR.anchor.z+=(hp.z-DIR.anchor.z)*k;
   // 固定機位：第一幀算出位置後整個鏡頭都不再動（位置相對舞台固定，角色走動時由攝影師搖攝＋變焦跟上）
   if(!sh.pos){const d=H*S.dist,az=sh.az+DIR.fa;sh.pos=new THREE.Vector3(DIR.anchor.x+Math.sin(az)*d,H*S.ch,DIR.anchor.z+Math.cos(az)*d);}
-  const aim=S.aim==='head'?c.head:S.aim==='chest'?c.chest:null;
-  if(aim)c.tgt.set(aim.x,aim.y-(S.aim==='head'?H*0.015:0),aim.z);else c.tgt.set(DIR.anchor.x,H*0.5,DIR.anchor.z);
+  // 瞄準點：頭骨在頭的底部，所以特寫往上抬、中景瞄在頭與胸之間（含整顆頭），全景瞄在身體中點偏上
+  if(S.aim==='head')c.tgt.set(c.head.x,c.head.y+H*0.05,c.head.z);else if(S.aim==='chest')c.tgt.set(c.head.x*0.7+c.chest.x*0.3,c.head.y-H*0.16,c.head.z*0.7+c.chest.z*0.3);else c.tgt.set(DIR.anchor.x,H*0.56,DIR.anchor.z);
   c.pos.copy(sh.pos);
   // 目標點低通：像攝影師手動跟拍，不貼死；切鏡頭那一幀直接對齊
   const tk=DIR.cutJump?1:1-Math.exp(-dt/0.28);DIR.tgtS.lerp(c.tgt,tk);DIR.cutJump=false;
