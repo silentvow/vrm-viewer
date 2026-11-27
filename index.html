@@ -46,7 +46,7 @@ body.nosd #side{display:none}
 #playpill{position:absolute;top:10px;left:50px;z-index:5;height:34px;min-width:34px;padding:0 12px;border-radius:8px;border:1px solid var(--line);background:color-mix(in srgb,var(--panel) 82%,transparent);color:var(--fg);font-size:13px;line-height:1;cursor:pointer;opacity:.7}#playpill:hover,#sidebtn:hover{opacity:1}#dirpill{position:absolute;top:10px;right:12px;z-index:5;height:34px;padding:0 12px;border-radius:8px;border:1px solid var(--line);background:color-mix(in srgb,var(--panel) 82%,transparent);color:var(--fg);font-size:13px;cursor:pointer;opacity:.75}#dirpill:hover{opacity:1}#dirpill.on{background:var(--acc);color:#fff;border-color:var(--acc);opacity:1}#dirshot{position:absolute;top:50px;right:14px;z-index:5;font-size:12px;color:#fff;background:rgba(0,0,0,.55);padding:2px 8px;border-radius:6px;pointer-events:none;display:none}
 </style>
 <div id="side">
-  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.9.4</span></h1>
+  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.9.5</span></h1>
   <div class="sub">在瀏覽器裡檢視 VRM 模型、播放 VRMA 動作、擺姿勢、調表情、換背景、配音樂。檔案只在你的瀏覽器內讀取，不會上傳。</div>
 
 
@@ -1568,10 +1568,10 @@ function dirNextBeat(t){const per=dirPer(),ph=dirPh();return ph+Math.ceil((t-ph)
 // SHOTS 欄位：fh 構圖高度（身高倍數，用 fov 反推）、dist 機位距離（身高倍數）、ch 機位高度（身高倍數）、aim 瞄準點（body/chest/head）、azs 可選角度、beats 持續拍數。
 const ez=p=>p*p*(3-2*p);
 const SHOTS={
-  wide:{name:'全景',fh:1.5,dist:3.6,ch:0.6,aim:'body',azs:[0,0.5,-0.5,0.95,-0.95],beats:[8,16]},
+  wide:{name:'全景',fh:1.5,dist:3.6,ch:0.6,aim:'body',azs:[0,0.5,-0.5],beats:[8,16]},
   high:{name:'高角全景',fh:1.5,dist:3.3,ch:1.45,aim:'body',azs:[0,0.55,-0.55],beats:[8,16]},
-  medium:{name:'中景',fh:0.88,dist:2.3,ch:0.68,aim:'chest',azs:[0,0.4,-0.4,0.75,-0.75],beats:[4,8]},
-  close:{name:'臉部特寫',fh:0.5,dist:1.5,ch:0.97,aim:'head',azs:[0,0.28,-0.28,0.5,-0.5],beats:[4,8]},
+  medium:{name:'中景',fh:0.88,dist:2.3,ch:0.68,aim:'chest',azs:[0,0.4,-0.4],beats:[4,8]},
+  close:{name:'臉部特寫',fh:0.5,dist:1.5,ch:0.97,aim:'head',azs:[0,0.28,-0.28],beats:[4,8]},
 };
 const STYLES={concert:{wide:2.5,medium:3,close:3,high:1},close:{close:6,medium:3,wide:1},wide:{wide:4,high:2,medium:1.5}};
 const LENS={auto:null,slow:[8,16],mid:[4,8],fast:[2,4]};
