@@ -43,10 +43,10 @@ details.sec>summary:hover{color:var(--fg)}
 body.nosd #side{display:none}
 #sidebtn{position:absolute;top:10px;left:10px;z-index:5;width:34px;height:34px;padding:0;border-radius:8px;border:1px solid var(--line);background:color-mix(in srgb,var(--panel) 82%,transparent);color:var(--fg);font-size:15px;line-height:1;cursor:pointer;opacity:.7}
 #sidebtn:hover,#sidebtn:focus-visible{opacity:1}
-#playpill{position:absolute;top:10px;left:50px;z-index:5;height:34px;min-width:34px;padding:0 12px;border-radius:8px;border:1px solid var(--line);background:color-mix(in srgb,var(--panel) 82%,transparent);color:var(--fg);font-size:13px;line-height:1;cursor:pointer;opacity:.7}#playpill:hover,#sidebtn:hover{opacity:1}#dirpill{position:absolute;top:10px;right:12px;z-index:5;height:34px;padding:0 12px;border-radius:8px;border:1px solid var(--line);background:color-mix(in srgb,var(--panel) 82%,transparent);color:var(--fg);font-size:13px;cursor:pointer;opacity:.75}#dirpill:hover{opacity:1}#dirpill.on{background:var(--acc);color:#fff;border-color:var(--acc);opacity:1}#dirshot{position:absolute;top:50px;right:14px;z-index:5;font-size:12px;color:#fff;background:rgba(0,0,0,.55);padding:2px 8px;border-radius:6px;pointer-events:none;display:none}
+#playpill{position:absolute;top:10px;left:50px;z-index:5;height:34px;min-width:34px;padding:0 12px;border-radius:8px;border:1px solid var(--line);background:color-mix(in srgb,var(--panel) 82%,transparent);color:var(--fg);font-size:13px;line-height:1;cursor:pointer;opacity:.7}#playpill:hover,#sidebtn:hover,#sidebtn:focus-visible{opacity:1}#dirpill{position:absolute;top:10px;right:12px;z-index:5;height:34px;padding:0 12px;border-radius:8px;border:1px solid var(--line);background:color-mix(in srgb,var(--panel) 82%,transparent);color:var(--fg);font-size:13px;cursor:pointer;opacity:.75}#dirpill:hover{opacity:1}#dirpill.on{background:var(--acc);color:#fff;border-color:var(--acc);opacity:1}#dirshot{position:absolute;top:50px;right:14px;z-index:5;font-size:12px;color:#fff;background:rgba(0,0,0,.55);padding:2px 8px;border-radius:6px;pointer-events:none;display:none}
 </style>
 <div id="side">
-  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.9.5</span></h1>
+  <h1>VRM 檢視器 <span id="ver" class="sub" style="font-size:12px;font-weight:400" title="檢視器版本（X.Y.Z）">v1.9.6</span></h1>
   <div class="sub">在瀏覽器裡檢視 VRM 模型、播放 VRMA 動作、擺姿勢、調表情、換背景、配音樂。檔案只在你的瀏覽器內讀取，不會上傳。</div>
 
 
@@ -118,7 +118,7 @@ body.nosd #side{display:none}
   <div id="info">（尚未載入）</div>
 </div>
 <script>
-// 左側面板：每個 h2 區段做成可摺疊（accordion），預設只展開 模型／動作／播放／音樂／姿勢／資訊；狀態記在 localStorage。命名規則：名詞、2–4 字、不放括號（補充說明放標題下的灰字）
+// 左側面板：每個 h2 區段做成可摺疊（accordion），預設只展開 模型／動作／播放／音樂／運鏡／姿勢／資訊；狀態記在 localStorage。命名規則：名詞、2–4 字、不放括號（補充說明放標題下的灰字）
 (function(){
   var OPEN=['模型','動作','播放','音樂','運鏡','姿勢','資訊'],KEY='vrmviewer.sections',saved={};
   try{saved=JSON.parse(localStorage.getItem(KEY)||'{}')}catch(e){}
@@ -558,7 +558,7 @@ const {createStage}=(()=>{
 // 演唱會舞台背景（本機檢視器用；純 three.js，程式產生，沒有外部素材）
 // 內容：漸層夜空背景、反光舞台地板（發光邊條＋同心圓）、後方 LED 螢幕（動態等化器／波紋）、兩側 LED 柱、燈架（truss）與 8 盞掃動光束＋地板光圈、
 //       漂浮的煙霧微粒、腳下的光暈；可選「舞台燈光染色」（左後／右後兩盞彩色逆光照在角色上）。配色 3 組。
-// 用法：const st=createStage(THREE,scene); st.setEnabled(true); st.setTheme('pinkblue'); 每幀 st.update(秒)
+// 用法：const st=createStage(scene); st.setEnabled(true); st.setTheme('pinkblue'); 每幀 st.update(秒)
 const THEMES={
   pinkblue:{name:'粉藍',c:['#ff4fa3','#35d0ff','#a66bff','#ffd1f0'],sky:['#04030a','#120a2a','#2a0f45']},
   redgold:{name:'紅金',c:['#ff2d3b','#ffb938','#ff7a2d','#fff1c9'],sky:['#050203','#1c0709','#3a1208']},
@@ -1200,6 +1200,8 @@ try{if(localStorage.getItem('vrmv_side')==='0')setSide(false,false);}catch(e){}
 const loader=new GLTFLoader();loader.register(p=>new VRMLoaderPlugin(p));loader.register(p=>new VRMAnimationLoaderPlugin(p));
 let vmdPlay=null,lastVmd=null;
 let vrm=null,mixer=null,action=null,clip=null,playing=true,sprMgr=null,colHelpers=[],skelHelper=null,vrmName='',vrmaName='',poseK=null;window.__scene=scene;window.__THREE=THREE;Object.defineProperty(window,"__vrm",{get:()=>vrm});
+function stopAction(){if(action){action.stop();mixer.uncacheAction(clip);action=null;clip=null;}}
+function resetRig(){vrm.humanoid.resetNormalizedPose();if(sprMgr)sprMgr.reset();}
 function loadGLTF(buf,label){
   return new Promise((res,rej)=>{say(`${label} 解析中…`);loader.parse(buf,'',res,rej);});
 }
@@ -1239,12 +1241,12 @@ async function loadVRMA(url,name,music){
 }
 async function applyVrma(a,name){
   if(!vrm)return;vmdPlay=null;
-  if(action){action.stop();mixer.uncacheAction(clip);}
-  vrm.humanoid.resetNormalizedPose();if(sprMgr)sprMgr.reset();poseK=null;
+  stopAction();
+  resetRig();poseK=null;
   clip=createVRMAnimationClip(a,vrm);action=mixer.clipAction(clip);action.setLoop($('loop').checked?THREE.LoopRepeat:THREE.LoopOnce,Infinity);action.clampWhenFinished=true;action.play();
   playing=true;$('play').textContent='暫停';updateInfo();say(`播放 ${name}（${clip.duration.toFixed(2)} 秒）`);
 }
-$('noanim').onclick=()=>{setMusic(null,'');vmdPlay=null;if(action){action.stop();mixer.uncacheAction(clip);action=null;clip=null;}if(vrm){vrm.humanoid.resetNormalizedPose();if(sprMgr)sprMgr.reset();}lastVrma=null;vrmaName='';poseK=null;updateInfo();say('已停止動作');};
+$('noanim').onclick=()=>{setMusic(null,'');vmdPlay=null;stopAction();if(vrm)resetRig();lastVrma=null;vrmaName='';poseK=null;updateInfo();say('已停止動作');};
 // ---------- VMD
 async function loadVMD(url,name){
   try{
@@ -1257,8 +1259,8 @@ async function loadVMD(url,name){
 }
 function startVmd(){
   if(!vrm||!lastVmd)return;
-  if(action){action.stop();mixer.uncacheAction(clip);action=null;clip=null;}lastVrma=null;vrmaName='';poseK=null;
-  vrm.humanoid.resetNormalizedPose();if(sprMgr)sprMgr.reset();
+  stopAction();lastVrma=null;vrmaName='';poseK=null;
+  resetRig();
   const d=lastVmd.d;vmdPlay={d,P:VMD.prep(vrm),t:0,dur:Math.max(d.max,1)/30,name:lastVmd.name};
   playing=true;$('play').textContent='暫停';updateInfo();say(`播放 VMD：${lastVmd.name}（${vmdPlay.dur.toFixed(2)} 秒，${d.bones.size} 條骨頭）`);
 }
@@ -1350,7 +1352,7 @@ let poseM=null;
 function startPose(name){
   if(!vrm){say('請先載入 VRM',true);return;}
   if(name==='（選擇姿勢）')return;vmdPlay=null;
-  if(action){action.stop();mixer.uncacheAction(clip);action=null;clip=null;}lastVrma=null;vrmaName='';
+  stopAction();lastVrma=null;vrmaName='';
   vrm.humanoid.resetNormalizedPose();
   if(name==='T-pose（回初始）'){poseK=null;say('已回初始姿勢');updateInfo();return;}
   const def=ALL_POSES[name];if(!def)return;
